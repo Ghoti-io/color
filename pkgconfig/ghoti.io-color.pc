@@ -1,0 +1,7 @@
+Name: Ghoti.io Color(BRANCH)
+Description: A colour engine: colour space description, ICC profiles, and transforms between spaces.
+Version: (VERSION)
+URL: https://github.com/Ghoti-io/color
+Libs: -L(PC_LIB_DIR) -l(SUITE)-(PROJECT)(BRANCH)
+CFlags: -I(PC_INCLUDE_DIR)
+Requires: (REQUIRES)
