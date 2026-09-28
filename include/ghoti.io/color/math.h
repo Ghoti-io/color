@@ -82,17 +82,46 @@ GCOL_API GCOL_Result gcol_chromatic_adapt(GCOL_Chromaticity from,
  * @brief Decode an encoded sample to linear light using @p info's transfer.
  *
  * Unknown or incomplete transfer returns the input unchanged. PQ and HLG use
- * their published EOTF/OETF; absolute scale is not applied here (see
- * white_luminance on the description).
+ * their published EOTF/OETF. For PQ the result is normalised to [0, 1] of
+ * 10000 cd/m^2; use ::gcol_linear_to_nits to obtain absolute luminance.
  */
 GCOL_API double gcol_transfer_decode(
     const GCOL_Color_Info * info, double encoded);
 
 /**
  * @brief Encode linear light to a transfer-coded sample.
+ *
+ * For PQ, @p linear is normalised [0, 1] of 10000 cd/m^2.
  */
 GCOL_API double gcol_transfer_encode(
     const GCOL_Color_Info * info, double linear);
+
+/**
+ * @brief Convert PQ-normalised (or absolute) linear light to cd/m^2.
+ *
+ * Uses @p info->white_luminance when set, else the transfer convention peak
+ * (10000 for PQ). Relative transfers return @p linear unchanged.
+ */
+GCOL_API double gcol_linear_to_nits(
+    const GCOL_Color_Info * info, double linear);
+
+/**
+ * @brief Inverse of ::gcol_linear_to_nits.
+ */
+GCOL_API double gcol_nits_to_linear(const GCOL_Color_Info * info, double nits);
+
+/**
+ * @brief Decode a 32-bit SGI LogLuv pixel (TIFF SGILOG) to CIE XYZ.
+ *
+ * LogLuv is scene-referred and absolute: Y is in cd/m^2 (approximately).
+ * The XYZ can be fed into a transform whose source is linear XYZ/RGB.
+ */
+GCOL_API GCOL_Result gcol_logluv32_to_xyz(uint32_t encoded, double xyz[3]);
+
+/**
+ * @brief Encode CIE XYZ as a 32-bit SGI LogLuv pixel.
+ */
+GCOL_API GCOL_Result gcol_xyz_to_logluv32(const double xyz[3], uint32_t * out);
 
 #ifdef __cplusplus
 }

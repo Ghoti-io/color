@@ -1,7 +1,8 @@
 # Design
 
-**Status:** design. Phases 0–2 (description, maths, matrix/TRC ICC parse and
-relative-colorimetric transforms) are implemented; phases 3–4 are not.
+**Status:** design. Phases 0–4 (description, maths, matrix/TRC and LUT ICC
+parse, CMYK polarity, relative-colorimetric transforms, PQ/HLG absolute scale,
+LogLuv helpers) are implemented.
 
 This page says what this library is for, what it refuses to be, and why it
 does not wrap the reference implementation. The phase plan lives outside this

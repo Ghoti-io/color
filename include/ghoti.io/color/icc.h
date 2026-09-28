@@ -23,8 +23,14 @@
  *
  * ICC profile parse, synthesise, and bridge to ::GCOL_Color_Info.
  *
- * Phase 2 reads ICC v2 matrix/TRC RGB (and grayscale) profiles. LUT-based
- * and v4 pipelines are later phases and return ::GCOL_ERR_UNSUPPORTED.
+ * Matrix/TRC RGB and grayscale profiles are recovered into a description.
+ * LUT profiles (mft1, mft2, mAB , mBA ) parse and transform via
+ * ::gcol_transform_create_icc; ::gcol_icc_to_color_info still returns
+ * ::GCOL_ERR_UNSUPPORTED for them because a LUT is not a gamut+transfer pair.
+ *
+ * Perceptual intent has no specification. This library implements colorimetric
+ * intents; requesting a perceptual transform returns ::GCOL_ERR_UNSUPPORTED
+ * rather than inventing a vendor mapping.
  */
 
 #ifndef GHOTI_IO_GCOL_ICC_H

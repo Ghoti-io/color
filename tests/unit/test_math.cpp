@@ -11,6 +11,7 @@
 
 #include <ghoti.io/color/icc.h>
 #include <ghoti.io/color/math.h>
+#include <ghoti.io/color/transform.h>
 
 #include <cmath>
 #include <cstring>
@@ -177,6 +178,120 @@ TEST(TransferMath, HlgRoundTrip) {
         1e-10)
         << e;
   }
+}
+
+/* ST 2084 EOTF known answers: encoded → normalised linear of 10000 nits.
+ * Values computed from the published constants in transfer_curve.c. */
+TEST(TransferMath, PqPublishedEotfPoints) {
+  GCOL_Color_Info info;
+  gcol_color_info_default(&info);
+  info.transfer = GCOL_TRANSFER_PQ;
+  (void)gcol_transfer_conventions(
+      GCOL_TRANSFER_PQ, &info.reference, &info.sample_scale, &info.white_luminance);
+  EXPECT_EQ(info.sample_scale, GCOL_SAMPLE_SCALE_ABSOLUTE);
+  EXPECT_NEAR(info.white_luminance, 10000.0, 1e-9);
+
+  /* EOTF(0) = 0; EOTF(1) = 1 (10000 nits). Code ~0.508 maps near 100 nits
+   * (normalised 0.01); code ~0.751 maps near 1000 nits (0.1). */
+  EXPECT_NEAR(gcol_transfer_decode(&info, 0.0), 0.0, 1e-12);
+  EXPECT_NEAR(gcol_transfer_decode(&info, 1.0), 1.0, 1e-6);
+  EXPECT_NEAR(gcol_transfer_decode(&info, 0.5081), 0.01, 5e-3);
+  EXPECT_NEAR(gcol_transfer_decode(&info, 0.7518), 0.1, 5e-3);
+
+  /* Absolute scale: normalised 0.1 → 1000 nits. */
+  EXPECT_NEAR(gcol_linear_to_nits(&info, 0.1), 1000.0, 1e-9);
+  EXPECT_NEAR(gcol_nits_to_linear(&info, 1000.0), 0.1, 1e-12);
+
+  /* Gate arm: neighbouring code must not equal the 0.01 point. */
+  EXPECT_GT(std::fabs(gcol_transfer_decode(&info, 0.5081) -
+                  gcol_transfer_decode(&info, 0.5200)),
+      1e-4);
+}
+
+TEST(TransferMath, HlgPublishedInverseOetf) {
+  GCOL_Color_Info info;
+  gcol_color_info_default(&info);
+  info.transfer = GCOL_TRANSFER_HLG;
+  /* BT.2100: E' = 0.5 → scene light = 1/12. */
+  EXPECT_NEAR(gcol_transfer_decode(&info, 0.5), 1.0 / 12.0, 1e-10);
+  EXPECT_NEAR(gcol_transfer_decode(&info, 0.0), 0.0, 1e-12);
+}
+
+TEST(HdrTransform, PqAbsoluteToRelativeSrgb) {
+  GCOL_Color_Info src, dst;
+  gcol_color_info_default(&src);
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&src, GCOL_PRIMARIES_BT2020));
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
+  src.transfer = GCOL_TRANSFER_PQ;
+  (void)gcol_transfer_conventions(
+      GCOL_TRANSFER_PQ, &src.reference, &src.sample_scale, &src.white_luminance);
+  src.white_luminance = 1000.0; /* map 1000 nits to relative 1.0 */
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+  dst.sample_scale = GCOL_SAMPLE_SCALE_RELATIVE;
+
+  GCOL_Transform * x = nullptr;
+  ASSERT_EQ(gcol_transform_create(nullptr, &src, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0, &x),
+      GCOL_OK);
+
+  /* PQ encode of 1000/10000 = 0.1 linear → should land near relative white
+   * after absolute→relative scale by white_luminance=1000. */
+  const double enc = gcol_transfer_encode(&src, 0.1);
+  float in[3] = {(float)enc, (float)enc, (float)enc};
+  float out[3] = {0, 0, 0};
+  GCOL_Sample_Layout layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(gcol_transform_apply(x, &layout, in, &layout, out, 1), GCOL_OK);
+  /* BT.2020 white → sRGB white; relative luminance ~1. */
+  EXPECT_NEAR(out[1], 1.0, 0.05);
+
+  gcol_transform_free(x);
+}
+
+TEST(LogLuv, RoundTripNeutral) {
+  const double xyz_in[3] = {0.9642, 1.0, 0.8249}; /* D50-ish */
+  uint32_t enc = 0;
+  ASSERT_EQ(gcol_xyz_to_logluv32(xyz_in, &enc), GCOL_OK);
+  EXPECT_NE(enc, 0u);
+  double xyz_out[3] = {0, 0, 0};
+  ASSERT_EQ(gcol_logluv32_to_xyz(enc, xyz_out), GCOL_OK);
+  EXPECT_NEAR(xyz_out[1], xyz_in[1], 0.02);
+  EXPECT_NEAR(xyz_out[0] / xyz_out[1], xyz_in[0] / xyz_in[1], 0.05);
+}
+
+TEST(LogLuv, HasSomewhereToGo) {
+  /* Encode a scene luminance, decode to XYZ, then transform into sRGB linear
+   * via a description that states absolute scene-referred light. */
+  const double xyz[3] = {0.2, 0.25, 0.15};
+  uint32_t enc = 0;
+  ASSERT_EQ(gcol_xyz_to_logluv32(xyz, &enc), GCOL_OK);
+  double decoded[3];
+  ASSERT_EQ(gcol_logluv32_to_xyz(enc, decoded), GCOL_OK);
+
+  GCOL_Color_Info src, dst;
+  gcol_color_info_default(&src);
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&src, GCOL_PRIMARIES_SRGB));
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
+  src.transfer = GCOL_TRANSFER_LINEAR;
+  src.reference = GCOL_REFERENCE_SCENE;
+  src.sample_scale = GCOL_SAMPLE_SCALE_ABSOLUTE;
+  src.white_luminance = 1.0; /* XYZ Y already in the desired relative units */
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+  dst.sample_scale = GCOL_SAMPLE_SCALE_RELATIVE;
+
+  /* XYZ → linear RGB under sRGB, then identity transform. */
+  double xyz_to_rgb[9];
+  ASSERT_EQ(gcol_xyz_to_gamut(&src.gamut, xyz_to_rgb), GCOL_OK);
+  double rgb[3] = {
+      xyz_to_rgb[0] * decoded[0] + xyz_to_rgb[1] * decoded[1] +
+          xyz_to_rgb[2] * decoded[2],
+      xyz_to_rgb[3] * decoded[0] + xyz_to_rgb[4] * decoded[1] +
+          xyz_to_rgb[5] * decoded[2],
+      xyz_to_rgb[6] * decoded[0] + xyz_to_rgb[7] * decoded[1] +
+          xyz_to_rgb[8] * decoded[2],
+  };
+  EXPECT_GT(rgb[1], 0.0);
 }
 
 int main(int argc, char ** argv) {

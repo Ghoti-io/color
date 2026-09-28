@@ -11,13 +11,13 @@ space", not "what is this particular monitor doing today".
 
 ## What is implemented
 
-**Phase 0 through phase 2 are done.** The library owns the colour description
+**Phases 0 through 4 are done.** The library owns the colour description
 (`GCOL_Color_Info` and the enums around it), the named-gamut and
-transfer-convention tables, matrix/TRC ICC synthesis and parse
-(`gcol_icc_write` / `gcol_icc_parse`), colour maths, and relative-colorimetric
-RGB↔RGB transforms (`gcol_transform_create` / `gcol_transform_apply`).
-`libs/image` depends on this library for the description types. LUT profiles,
-CMYK, and HDR transfers are later phases; the plan is in the workspace at
+transfer-convention tables, matrix/TRC and LUT ICC parse
+(`gcol_icc_write` / `gcol_icc_parse`), colour maths, relative-colorimetric
+RGB↔RGB transforms, CMYK LUT transforms with `cmyk_polarity`, PQ/HLG with
+absolute scale, and LogLuv32↔XYZ helpers. `libs/image` depends on this
+library for the description types. The plan is in the workspace at
 `planning/color.md`.
 
 | Phase | Content | Status |
@@ -26,11 +26,15 @@ CMYK, and HDR transfers are later phases; the plan is in the workspace at
 | 0 | the colour *description* moves here from `libs/image` | **done** |
 | 1 | chromaticity to XYZ, chromatic adaptation, transfer curves | **done** |
 | 2 | ICC parse and write, matrix/TRC profiles, transforms | **done** |
-| 3 | LUT-based profiles, CMYK, ICC v4 | |
-| 4 | HDR: PQ, HLG, absolute luminance | |
+| 3 | LUT-based profiles, CMYK, ICC v4 tags | **done** |
+| 4 | HDR: PQ, HLG, absolute luminance; LogLuv helpers | **done** |
 
 A header appears under `include/ghoti.io/color/` in the commit that implements
 it, so the directory listing is what exists rather than what is intended.
+
+Perceptual rendering intent is **not** implemented: it has no specification,
+and requesting it returns `GCOL_ERR_UNSUPPORTED`. Colorimetric intents are
+what this library transforms under.
 
 ## Why not littleCMS
 

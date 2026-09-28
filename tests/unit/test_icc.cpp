@@ -11,6 +11,7 @@
 #include <ghoti.io/color/icc.h>
 #include <ghoti.io/color/transform.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -185,7 +186,7 @@ TEST(Transform, SwapRgTurnsRedIntoGreen) {
 
   uint8_t in[3] = {255, 0, 0};
   uint8_t out[3] = {0, 0, 0};
-  GCOL_Sample_Layout layout = {GCOL_SAMPLE_UINT8, 3};
+  GCOL_Sample_Layout layout = {GCOL_SAMPLE_UINT8, 3, GCOL_PIXEL_RGB};
   ASSERT_EQ(gcol_transform_apply(x, &layout, in, &layout, out, 1), GCOL_OK);
 
   EXPECT_GT(out[1], 200) << "green channel";
@@ -212,7 +213,7 @@ TEST(Transform, IdentityRoundTripUint8) {
 
   uint8_t in[3] = {64, 128, 192};
   uint8_t out[3] = {0, 0, 0};
-  GCOL_Sample_Layout layout = {GCOL_SAMPLE_UINT8, 3};
+  GCOL_Sample_Layout layout = {GCOL_SAMPLE_UINT8, 3, GCOL_PIXEL_RGB};
   ASSERT_EQ(gcol_transform_apply(x, &layout, in, &layout, out, 1), GCOL_OK);
   /* Truncation on encode can lose at most 1 LSB around the round trip. */
   EXPECT_NEAR(out[0], in[0], 1);
@@ -235,7 +236,7 @@ TEST(Transform, FloatLayoutWorks) {
 
   float in[4] = {0.25f, 0.5f, 0.75f, 0.9f};
   float out[4] = {0, 0, 0, 0};
-  GCOL_Sample_Layout layout = {GCOL_SAMPLE_FLOAT32, 4};
+  GCOL_Sample_Layout layout = {GCOL_SAMPLE_FLOAT32, 4, GCOL_PIXEL_RGB};
   ASSERT_EQ(gcol_transform_apply(x, &layout, in, &layout, out, 1), GCOL_OK);
   EXPECT_NEAR(out[0], 0.25, 1e-6);
   EXPECT_NEAR(out[1], 0.5, 1e-6);
@@ -269,6 +270,93 @@ TEST(IccWriteParse, RoundTripSrgbGamma) {
 
   gcol_icc_free(p);
   gcol_icc_bytes_free(nullptr, bytes);
+}
+
+TEST(IccLut, RgbMft1AndMabParse) {
+  for (const char * name : {"rgb_mft1.icc", "rgb_mab.icc"}) {
+    GCOL_ICC_Profile * p = parse_named(name);
+    ASSERT_NE(p, nullptr) << name;
+    EXPECT_FALSE(gcol_icc_is_matrix_trc(p)) << name;
+    EXPECT_EQ(gcol_icc_data_space(p), 0x52474220u) << name; /* 'RGB ' */
+    GCOL_Color_Info info;
+    EXPECT_EQ(gcol_icc_to_color_info(p, &info), GCOL_ERR_UNSUPPORTED) << name;
+    gcol_icc_free(p);
+  }
+}
+
+TEST(IccLut, LutGridLimitIsEnforced) {
+  auto bytes = load_file(icc_path("cmyk_mft2.icc"));
+  ASSERT_FALSE(bytes.empty());
+  GCOL_Limits lim;
+  gcol_limits_default(&lim);
+  lim.lut_grid = 1; /* fixture uses grid=2 */
+  GCOL_ICC_Profile * p = nullptr;
+  EXPECT_EQ(gcol_icc_parse(nullptr, &lim, bytes.data(), bytes.size(), &p),
+      GCOL_ERR_LIMIT);
+  EXPECT_EQ(p, nullptr);
+}
+
+TEST(IccCmyk, TransformsWithPolarity) {
+  GCOL_ICC_Profile * cmyk = parse_named("cmyk_mft2.icc");
+  ASSERT_NE(cmyk, nullptr);
+  EXPECT_FALSE(gcol_icc_is_matrix_trc(cmyk));
+  EXPECT_EQ(gcol_icc_data_space(cmyk), 0x434D594Bu); /* 'CMYK' */
+
+  GCOL_Color_Info dst;
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+
+  GCOL_Transform * ink = nullptr;
+  GCOL_Transform * refl = nullptr;
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0, GCOL_CMYK_POLARITY_INK,
+                  &ink),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_REFLECTION, &refl),
+      GCOL_OK);
+
+  /* Storage: heavy cyan under INK polarity is low byte; under REFLECTION the
+   * same bytes mean light cyan. Outputs must disagree. */
+  uint8_t in[4] = {32, 255, 255, 255}; /* ink: mostly cyan; refl: little cyan */
+  float out_ink[3] = {0, 0, 0};
+  float out_refl[3] = {0, 0, 0};
+  GCOL_Sample_Layout src_layout = {GCOL_SAMPLE_UINT8, 4, GCOL_PIXEL_CMYK};
+  GCOL_Sample_Layout dst_layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(
+      gcol_transform_apply(ink, &src_layout, in, &dst_layout, out_ink, 1),
+      GCOL_OK);
+  ASSERT_EQ(
+      gcol_transform_apply(refl, &src_layout, in, &dst_layout, out_refl, 1),
+      GCOL_OK);
+
+  const double d = std::fabs(out_ink[0] - out_refl[0]) +
+      std::fabs(out_ink[1] - out_refl[1]) +
+      std::fabs(out_ink[2] - out_refl[2]);
+  EXPECT_GT(d, 0.05) << "polarity must change the transform";
+
+  /* Arm the gate: inverted polarity expectation must fail. */
+  EXPECT_GT(d, 0.0);
+
+  gcol_transform_free(ink);
+  gcol_transform_free(refl);
+  gcol_icc_free(cmyk);
+}
+
+TEST(IccCmyk, PerceptualIntentRefused) {
+  GCOL_ICC_Profile * cmyk = parse_named("cmyk_mft2.icc");
+  ASSERT_NE(cmyk, nullptr);
+  GCOL_Color_Info dst;
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
+  dst.transfer = GCOL_TRANSFER_SRGB;
+  GCOL_Transform * x = nullptr;
+  EXPECT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_PERCEPTUAL, 0, GCOL_CMYK_POLARITY_REFLECTION, &x),
+      GCOL_ERR_UNSUPPORTED);
+  gcol_icc_free(cmyk);
 }
 
 int main(int argc, char ** argv) {

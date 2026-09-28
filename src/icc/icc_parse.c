@@ -21,10 +21,11 @@
 /**
  * @file
  *
- * Parse ICC v2 matrix/TRC profiles.
+ * Parse ICC v2/v4 matrix/TRC and LUT (mft1/mft2/mAB) profiles.
  */
 
 #include "icc_internal.h"
+#include "icc_lut.h"
 
 #include <ghoti.io/color/math.h>
 
@@ -290,8 +291,59 @@ GCOL_API GCOL_Result gcol_icc_parse(const GCOL_Allocator * alloc,
     }
   }
 
-  if (prof->pcs != GCOL_ICC_SIG_XYZ) {
-    /* Parsed enough to refuse cleanly. */
+  const bool pcs_xyz = (prof->pcs == GCOL_ICC_SIG_XYZ);
+  const bool pcs_lab = (prof->pcs == GCOL_ICC_SIG_LAB);
+  if (!pcs_xyz && !pcs_lab) {
+    gcol_icc_free(prof);
+    return GCOL_ERR_UNSUPPORTED;
+  }
+
+  /* Prefer relative-colorimetric AToB1, then perceptual AToB0, then AToB2. */
+  static const uint32_t a2b_sigs[3] = {
+      GCOL_ICC_SIG_A2B1, GCOL_ICC_SIG_A2B0, GCOL_ICC_SIG_A2B2};
+  for (int i = 0; i < 3; i++) {
+    if (find_tag(p, size, tag_count, a2b_sigs[i], &off, &tsz) != GCOL_OK) {
+      continue;
+    }
+    gcol_icc_lut_t * lut =
+        (gcol_icc_lut_t *)gcol_alloc(alloc, 1, sizeof(gcol_icc_lut_t));
+    if (!lut) {
+      gcol_icc_free(prof);
+      return GCOL_ERR_OOM;
+    }
+    lut->e[0] = lut->e[4] = lut->e[8] = 1.0;
+    GCOL_Result lr =
+        gcol_icc_lut_parse(alloc, &lim, p + off, tsz, pcs_lab, lut);
+    if (lr != GCOL_OK) {
+      gcol_icc_lut_clear(lut, alloc);
+      alloc->free_fn(alloc->ctx, lut);
+      gcol_icc_free(prof);
+      return lr;
+    }
+    /* Channel count must match the data colour space. */
+    uint8_t expect = 0;
+    if (prof->data_space == GCOL_ICC_SIG_RGB) {
+      expect = 3;
+    } else if (prof->data_space == GCOL_ICC_SIG_CMYK) {
+      expect = 4;
+    } else if (prof->data_space == GCOL_ICC_SIG_GRAY) {
+      expect = 1;
+    }
+    if (expect != 0 && lut->input_chan != expect) {
+      gcol_icc_lut_clear(lut, alloc);
+      alloc->free_fn(alloc->ctx, lut);
+      gcol_icc_free(prof);
+      return GCOL_ERR_CORRUPT;
+    }
+    prof->a2b = lut;
+    prof->has_lut = true;
+    prof->matrix_trc = false;
+    *out = prof;
+    return GCOL_OK;
+  }
+
+  if (pcs_lab) {
+    /* Lab PCS without a LUT: nothing else we handle. */
     gcol_icc_free(prof);
     return GCOL_ERR_UNSUPPORTED;
   }
@@ -417,10 +469,23 @@ GCOL_API void gcol_icc_free(GCOL_ICC_Profile * profile) {
   gcol_icc_curve_clear(&profile->trc_g, a);
   gcol_icc_curve_clear(&profile->trc_b, a);
   gcol_icc_curve_clear(&profile->trc_k, a);
+  if (profile->a2b) {
+    gcol_icc_lut_clear(profile->a2b, a);
+    a->free_fn(a->ctx, profile->a2b);
+    profile->a2b = NULL;
+  }
   if (profile->description) {
     a->free_fn(a->ctx, profile->description);
   }
   a->free_fn(a->ctx, profile);
+}
+
+bool gcol_icc_has_lut(const GCOL_ICC_Profile * profile) {
+  return profile && profile->has_lut && profile->a2b;
+}
+
+const gcol_icc_lut_t * gcol_icc_a2b(const GCOL_ICC_Profile * profile) {
+  return gcol_icc_has_lut(profile) ? profile->a2b : NULL;
 }
 
 GCOL_API uint32_t gcol_icc_version(const GCOL_ICC_Profile * profile) {

@@ -29,7 +29,11 @@
  *
  * Narrowing from float to an integer sample truncates; widening from an
  * integer sample to float does not need a rounding rule. Values outside the
- * unit interval are clipped before encoding.
+ * unit interval are clipped before encoding unless absolute HDR keeps them.
+ *
+ * Perceptual intent is vendor-defined and is not implemented here: requesting
+ * it returns ::GCOL_ERR_UNSUPPORTED. Colorimetric intents are specification-
+ * defined and are what this library transforms under.
  */
 
 #ifndef GHOTI_IO_GCOL_TRANSFORM_H
@@ -40,6 +44,7 @@
 #include <ghoti.io/color/allocator.h>
 #include <ghoti.io/color/color.h>
 #include <ghoti.io/color/core.h>
+#include <ghoti.io/color/icc.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -58,15 +63,24 @@ typedef enum {
 } GCOL_Sample_Type;
 
 /**
+ * @brief Colour model of interleaved samples in a buffer.
+ */
+typedef enum {
+  GCOL_PIXEL_RGB = 0, ///< 3 = RGB, 4 = RGBA (alpha copied through).
+  GCOL_PIXEL_CMYK,    ///< 4 channels; polarity from the transform source.
+  GCOL_PIXEL_COUNT
+} GCOL_Pixel_Model;
+
+/**
  * @brief How samples sit in memory for ::gcol_transform_apply.
  *
- * Interleaved only. @a channel_count of 3 is RGB; 4 is RGBA and the alpha
- * channel is copied through unchanged. Nothing here describes compression,
- * subsampling, or palettes - that stays in libs/image.
+ * Interleaved only. Nothing here describes compression, subsampling, or
+ * palettes - that stays in libs/image.
  */
 typedef struct GCOL_Sample_Layout {
   GCOL_Sample_Type type;
-  unsigned channel_count; ///< 3 or 4.
+  unsigned channel_count; ///< RGB: 3 or 4; CMYK: 4.
+  GCOL_Pixel_Model model; ///< ::GCOL_PIXEL_RGB by default (zero-init).
 } GCOL_Sample_Layout;
 
 /**
@@ -80,8 +94,10 @@ typedef struct GCOL_Transform GCOL_Transform;
 /**
  * @brief Build a transform from @p src into @p dst.
  *
- * Phase 2 supports matrix/TRC RGB descriptions under relative colorimetric
- * intent (PCS XYZ D50). Other intents return ::GCOL_ERR_UNSUPPORTED.
+ * Supports matrix/TRC RGB descriptions under relative colorimetric intent
+ * (PCS XYZ D50). Absolute PQ sources are mapped into a relative destination
+ * by scaling through white_luminance (simple display-referred tone map).
+ * Other intents return ::GCOL_ERR_UNSUPPORTED.
  *
  * @param alloc Allocator, or NULL for the default.
  * @param src Source description. Must state primaries, white, and transfer.
@@ -93,6 +109,21 @@ typedef struct GCOL_Transform GCOL_Transform;
 GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
     const GCOL_Color_Info * src, const GCOL_Color_Info * dst,
     GCOL_Rendering_Intent intent, uint32_t flags, GCOL_Transform ** out);
+
+/**
+ * @brief Build a transform from a parsed ICC profile into @p dst.
+ *
+ * Used for LUT and CMYK profiles. @p cmyk_polarity selects how CMYK bytes are
+ * read: ::GCOL_CMYK_POLARITY_INK inverts (Adobe/JPEG), ::GCOL_CMYK_POLARITY_REFLECTION
+ * passes device values through (0 = no ink). Unknown polarity is refused for
+ * CMYK sources.
+ *
+ * Relative colorimetric only. Perceptual is unsupported (no specification).
+ */
+GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
+    const GCOL_ICC_Profile * src, const GCOL_Color_Info * dst,
+    GCOL_Rendering_Intent intent, uint32_t flags,
+    GCOL_CMYK_Polarity cmyk_polarity, GCOL_Transform ** out);
 
 /**
  * @brief Free a transform from ::gcol_transform_create.

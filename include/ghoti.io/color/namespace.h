@@ -76,11 +76,16 @@
 #define gcol_chromatic_adapt GHOTIIO_COLOR(gcol_chromatic_adapt)
 #define gcol_transfer_decode GHOTIIO_COLOR(gcol_transfer_decode)
 #define gcol_transfer_encode GHOTIIO_COLOR(gcol_transfer_encode)
+#define gcol_linear_to_nits GHOTIIO_COLOR(gcol_linear_to_nits)
+#define gcol_nits_to_linear GHOTIIO_COLOR(gcol_nits_to_linear)
+#define gcol_logluv32_to_xyz GHOTIIO_COLOR(gcol_logluv32_to_xyz)
+#define gcol_xyz_to_logluv32 GHOTIIO_COLOR(gcol_xyz_to_logluv32)
 
-/* ICC parse and transforms (phase 2). */
+/* ICC parse and transforms (phase 2–3). */
 #define GCOL_Limits GHOTIIO_COLOR(GCOL_Limits)
 #define GCOL_ICC_Profile GHOTIIO_COLOR(GCOL_ICC_Profile)
 #define GCOL_Sample_Type GHOTIIO_COLOR(GCOL_Sample_Type)
+#define GCOL_Pixel_Model GHOTIIO_COLOR(GCOL_Pixel_Model)
 #define GCOL_Sample_Layout GHOTIIO_COLOR(GCOL_Sample_Layout)
 #define GCOL_Transform GHOTIIO_COLOR(GCOL_Transform)
 
@@ -97,6 +102,7 @@
 #define gcol_icc_profile_id GHOTIIO_COLOR(gcol_icc_profile_id)
 #define gcol_icc_to_color_info GHOTIIO_COLOR(gcol_icc_to_color_info)
 #define gcol_transform_create GHOTIIO_COLOR(gcol_transform_create)
+#define gcol_transform_create_icc GHOTIIO_COLOR(gcol_transform_create_icc)
 #define gcol_transform_free GHOTIIO_COLOR(gcol_transform_free)
 #define gcol_transform_apply GHOTIIO_COLOR(gcol_transform_apply)
 
