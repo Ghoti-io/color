@@ -38,7 +38,8 @@
 
 enum {
   GCOL_XFORM_MATRIX = 0,
-  GCOL_XFORM_ICC_LUT = 1
+  GCOL_XFORM_ICC_LUT = 1,  ///< Device→PCS→RGB destination.
+  GCOL_XFORM_ICC_B2A = 2   ///< RGB→PCS→device (BToA / destination CMYK).
 };
 
 struct GCOL_Transform {
@@ -53,6 +54,7 @@ struct GCOL_Transform {
   /** Borrowed from the profile passed to create_icc; not owned. */
   const gcol_icc_lut_t * lut;
   uint8_t src_channels; ///< 3 for RGB matrix, lut->input_chan for ICC.
+  uint8_t dst_channels; ///< 3 for RGB, lut->output_chan for B2A.
 };
 
 static const GCOL_Chromaticity gcol_pcs_d50 = {0.3457, 0.3585};
@@ -85,12 +87,16 @@ static bool layout_ok_src(
   return layout->channel_count == 3u || layout->channel_count == 4u;
 }
 
-static bool layout_ok_dst(const GCOL_Sample_Layout * layout) {
+static bool layout_ok_dst(
+    const GCOL_Sample_Layout * layout, const GCOL_Transform * x) {
   if (!layout || layout->type >= GCOL_SAMPLE_TYPE_COUNT) {
     return false;
   }
   if (layout->model == GCOL_PIXEL_CMYK) {
-    return false; /* destination CMYK not implemented */
+    return layout->channel_count == 4u && x->dst_channels == 4u;
+  }
+  if (x->dst_channels == 4u) {
+    return false;
   }
   return layout->channel_count == 3u || layout->channel_count == 4u;
 }
@@ -150,33 +156,36 @@ static void read_channels(const GCOL_Sample_Layout * layout,
   }
 }
 
-static void write_pixel(const GCOL_Sample_Layout * layout, unsigned char * p,
-    const double rgb[3], double alpha) {
+static void write_channels(const GCOL_Sample_Layout * layout, unsigned char * p,
+    const double * ch, unsigned n, double alpha) {
   switch (layout->type) {
   case GCOL_SAMPLE_UINT8:
-    p[0] = (unsigned char)(clamp01(rgb[0]) * 255.0);
-    p[1] = (unsigned char)(clamp01(rgb[1]) * 255.0);
-    p[2] = (unsigned char)(clamp01(rgb[2]) * 255.0);
-    if (layout->channel_count == 4u) {
+    for (unsigned i = 0; i < n; i++) {
+      p[i] = (unsigned char)(clamp01(ch[i]) * 255.0);
+    }
+    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u &&
+        n < 4u) {
       p[3] = (unsigned char)(clamp01(alpha) * 255.0);
     }
     break;
   case GCOL_SAMPLE_FLOAT32: {
     float * f = (float *)(void *)p;
-    f[0] = (float)rgb[0];
-    f[1] = (float)rgb[1];
-    f[2] = (float)rgb[2];
-    if (layout->channel_count == 4u) {
+    for (unsigned i = 0; i < n; i++) {
+      f[i] = (float)ch[i];
+    }
+    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u &&
+        n < 4u) {
       f[3] = (float)alpha;
     }
     break;
   }
   case GCOL_SAMPLE_FLOAT64: {
     double * d = (double *)(void *)p;
-    d[0] = rgb[0];
-    d[1] = rgb[1];
-    d[2] = rgb[2];
-    if (layout->channel_count == 4u) {
+    for (unsigned i = 0; i < n; i++) {
+      d[i] = ch[i];
+    }
+    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u &&
+        n < 4u) {
       d[3] = alpha;
     }
     break;
@@ -309,6 +318,7 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
   x->kind = GCOL_XFORM_MATRIX;
   x->flags = flags;
   x->src_channels = 3;
+  x->dst_channels = 3;
   x->lut = NULL;
   x->cmyk_polarity = GCOL_CMYK_POLARITY_UNKNOWN;
   gcol_mat3_mul(pcs_to_dst, src_to_pcs, x->matrix);
@@ -372,8 +382,68 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
   x->flags = flags;
   x->lut = src->a2b;
   x->src_channels = src->a2b->input_chan;
+  x->dst_channels = 3;
   x->cmyk_polarity = cmyk_polarity;
   memcpy(x->matrix, pcs_to_dst, sizeof(x->matrix));
+  *out = x;
+  return GCOL_OK;
+}
+
+GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
+    const GCOL_Color_Info * src, const GCOL_ICC_Profile * dst,
+    GCOL_Rendering_Intent intent, uint32_t flags,
+    GCOL_CMYK_Polarity cmyk_polarity, GCOL_Transform ** out) {
+  if (!out) {
+    return GCOL_ERR_INVALID;
+  }
+  *out = NULL;
+  if (!src || !dst) {
+    return GCOL_ERR_INVALID;
+  }
+  if (!gcol_icc_has_b2a(dst)) {
+    return GCOL_ERR_UNSUPPORTED;
+  }
+  if (!src->primaries_stated || !src->white_stated ||
+      src->transfer == GCOL_TRANSFER_UNKNOWN) {
+    return GCOL_ERR_INVALID;
+  }
+  if (intent != GCOL_INTENT_RELATIVE_COLORIMETRIC) {
+    return GCOL_ERR_UNSUPPORTED;
+  }
+  if (dst->data_space == GCOL_ICC_SIG_CMYK) {
+    if (cmyk_polarity != GCOL_CMYK_POLARITY_INK &&
+        cmyk_polarity != GCOL_CMYK_POLARITY_REFLECTION) {
+      return GCOL_ERR_INVALID;
+    }
+  }
+  if (!alloc) {
+    alloc = gcol_allocator_default();
+  }
+  if (flags == 0u) {
+    flags = GCOL_TRANSFORM_CLIP;
+  }
+
+  double src_to_pcs[9];
+  GCOL_Result r = build_rgb_to_pcs(src, src_to_pcs);
+  if (r != GCOL_OK) {
+    return r;
+  }
+
+  GCOL_Transform * x =
+      (GCOL_Transform *)alloc->calloc_fn(alloc->ctx, 1, sizeof(GCOL_Transform));
+  if (!x) {
+    return GCOL_ERR_OOM;
+  }
+  x->alloc = *alloc;
+  copy_info(&x->src, src);
+  gcol_color_info_default(&x->dst);
+  x->kind = GCOL_XFORM_ICC_B2A;
+  x->flags = flags;
+  x->lut = dst->b2a;
+  x->src_channels = 3;
+  x->dst_channels = dst->b2a->output_chan;
+  x->cmyk_polarity = cmyk_polarity;
+  memcpy(x->matrix, src_to_pcs, sizeof(x->matrix));
   *out = x;
   return GCOL_OK;
 }
@@ -391,7 +461,7 @@ GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
   if (!xform || !src_layout || !dst_layout) {
     return GCOL_ERR_INVALID;
   }
-  if (!layout_ok_src(src_layout, xform) || !layout_ok_dst(dst_layout)) {
+  if (!layout_ok_src(src_layout, xform) || !layout_ok_dst(dst_layout, xform)) {
     return GCOL_ERR_INVALID;
   }
   if (pixel_count && (!src || !dst)) {
@@ -406,12 +476,40 @@ GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
 
   for (size_t i = 0; i < pixel_count; i++) {
     double ch[4] = {0, 0, 0, 0};
-    double lin_dst[3];
-    double enc_dst[3];
     double alpha = 1.0;
     const unsigned nsrc = xform->src_channels;
     read_channels(src_layout, sp + i * src_stride, ch, nsrc, &alpha);
 
+    if (xform->kind == GCOL_XFORM_ICC_B2A) {
+      double lin[3];
+      lin[0] = decode_to_relative(&xform->src, ch[0]);
+      lin[1] = decode_to_relative(&xform->src, ch[1]);
+      lin[2] = decode_to_relative(&xform->src, ch[2]);
+      double xyz[3];
+      gcol_mat3_vec(xform->matrix, lin, xyz);
+      double device[4] = {0, 0, 0, 0};
+      GCOL_Result lr = gcol_icc_lut_apply_b2a(xform->lut, xyz, device);
+      if (lr != GCOL_OK) {
+        return lr;
+      }
+      if (dst_layout->model == GCOL_PIXEL_CMYK &&
+          xform->cmyk_polarity == GCOL_CMYK_POLARITY_INK) {
+        for (unsigned c = 0; c < xform->dst_channels; c++) {
+          device[c] = 1.0 - device[c];
+        }
+      }
+      if (clip) {
+        for (unsigned c = 0; c < xform->dst_channels; c++) {
+          device[c] = clamp01(device[c]);
+        }
+      }
+      write_channels(
+          dst_layout, dp + i * dst_stride, device, xform->dst_channels, alpha);
+      continue;
+    }
+
+    double lin_dst[3];
+    double enc_dst[3];
     if (xform->kind == GCOL_XFORM_ICC_LUT) {
       double device[4];
       for (unsigned c = 0; c < nsrc; c++) {
@@ -449,7 +547,7 @@ GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
       enc_dst[1] = clamp01(enc_dst[1]);
       enc_dst[2] = clamp01(enc_dst[2]);
     }
-    write_pixel(dst_layout, dp + i * dst_stride, enc_dst, alpha);
+    write_channels(dst_layout, dp + i * dst_stride, enc_dst, 3, alpha);
   }
   return GCOL_OK;
 }

@@ -60,4 +60,11 @@ GCOL_Result gcol_icc_lut_parse(const GCOL_Allocator * alloc,
 GCOL_Result gcol_icc_lut_apply(const gcol_icc_lut_t * lut,
     const double * device, double xyz[3]);
 
+/**
+ * Apply PCS XYZ through a BToA LUT to device values in [0,1].
+ * @p device length is lut->output_chan.
+ */
+GCOL_Result gcol_icc_lut_apply_b2a(const gcol_icc_lut_t * lut,
+    const double xyz[3], double * device);
+
 #endif /* GHOTI_IO_GCOL_ICC_LUT_H */

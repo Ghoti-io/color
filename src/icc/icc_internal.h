@@ -107,6 +107,8 @@ struct GCOL_ICC_Profile {
   gcol_icc_curve_t trc_k;
   /** Owned when has_lut; relative-colorimetric AToB preferred. */
   gcol_icc_lut_t * a2b;
+  /** Owned when present; relative-colorimetric BToA preferred (PCS→device). */
+  gcol_icc_lut_t * b2a;
   unsigned char profile_id[16];
 };
 
@@ -115,6 +117,12 @@ bool gcol_icc_has_lut(const GCOL_ICC_Profile * profile);
 
 /** Device→PCS LUT, or NULL. */
 const gcol_icc_lut_t * gcol_icc_a2b(const GCOL_ICC_Profile * profile);
+
+/** True when @p profile carries a PCS→device LUT. */
+bool gcol_icc_has_b2a(const GCOL_ICC_Profile * profile);
+
+/** PCS→device LUT, or NULL. */
+const gcol_icc_lut_t * gcol_icc_b2a(const GCOL_ICC_Profile * profile);
 
 uint32_t gcol_icc_read_u32(const unsigned char * p);
 uint16_t gcol_icc_read_u16(const unsigned char * p);

@@ -335,9 +335,63 @@ GCOL_API GCOL_Result gcol_icc_parse(const GCOL_Allocator * alloc,
       gcol_icc_free(prof);
       return GCOL_ERR_CORRUPT;
     }
+    if (lut->output_chan < 3u) {
+      gcol_icc_lut_clear(lut, alloc);
+      alloc->free_fn(alloc->ctx, lut);
+      gcol_icc_free(prof);
+      return GCOL_ERR_CORRUPT;
+    }
     prof->a2b = lut;
     prof->has_lut = true;
     prof->matrix_trc = false;
+    break;
+  }
+
+  /* Prefer relative-colorimetric BToA1, then BToA0, then BToA2. */
+  static const uint32_t b2a_sigs[3] = {
+      GCOL_ICC_SIG_B2A1, GCOL_ICC_SIG_B2A0, GCOL_ICC_SIG_B2A2};
+  for (int i = 0; i < 3; i++) {
+    if (find_tag(p, size, tag_count, b2a_sigs[i], &off, &tsz) != GCOL_OK) {
+      continue;
+    }
+    gcol_icc_lut_t * lut =
+        (gcol_icc_lut_t *)gcol_alloc(alloc, 1, sizeof(gcol_icc_lut_t));
+    if (!lut) {
+      gcol_icc_free(prof);
+      return GCOL_ERR_OOM;
+    }
+    lut->e[0] = lut->e[4] = lut->e[8] = 1.0;
+    GCOL_Result lr =
+        gcol_icc_lut_parse(alloc, &lim, p + off, tsz, pcs_lab, lut);
+    if (lr != GCOL_OK) {
+      gcol_icc_lut_clear(lut, alloc);
+      alloc->free_fn(alloc->ctx, lut);
+      gcol_icc_free(prof);
+      return lr;
+    }
+    uint8_t expect = 0;
+    if (prof->data_space == GCOL_ICC_SIG_RGB) {
+      expect = 3;
+    } else if (prof->data_space == GCOL_ICC_SIG_CMYK) {
+      expect = 4;
+    } else if (prof->data_space == GCOL_ICC_SIG_GRAY) {
+      expect = 1;
+    }
+    /* B2A: PCS in (3), device out. */
+    if (lut->input_chan < 3u || (expect != 0 && lut->output_chan != expect)) {
+      gcol_icc_lut_clear(lut, alloc);
+      alloc->free_fn(alloc->ctx, lut);
+      gcol_icc_free(prof);
+      return GCOL_ERR_CORRUPT;
+    }
+    lut->pcs_to_device = true;
+    prof->b2a = lut;
+    prof->has_lut = true;
+    prof->matrix_trc = false;
+    break;
+  }
+
+  if (prof->a2b || prof->b2a) {
     *out = prof;
     return GCOL_OK;
   }
@@ -474,6 +528,11 @@ GCOL_API void gcol_icc_free(GCOL_ICC_Profile * profile) {
     a->free_fn(a->ctx, profile->a2b);
     profile->a2b = NULL;
   }
+  if (profile->b2a) {
+    gcol_icc_lut_clear(profile->b2a, a);
+    a->free_fn(a->ctx, profile->b2a);
+    profile->b2a = NULL;
+  }
   if (profile->description) {
     a->free_fn(a->ctx, profile->description);
   }
@@ -486,6 +545,14 @@ bool gcol_icc_has_lut(const GCOL_ICC_Profile * profile) {
 
 const gcol_icc_lut_t * gcol_icc_a2b(const GCOL_ICC_Profile * profile) {
   return gcol_icc_has_lut(profile) ? profile->a2b : NULL;
+}
+
+bool gcol_icc_has_b2a(const GCOL_ICC_Profile * profile) {
+  return profile && profile->b2a != NULL;
+}
+
+const gcol_icc_lut_t * gcol_icc_b2a(const GCOL_ICC_Profile * profile) {
+  return gcol_icc_has_b2a(profile) ? profile->b2a : NULL;
 }
 
 GCOL_API uint32_t gcol_icc_version(const GCOL_ICC_Profile * profile) {

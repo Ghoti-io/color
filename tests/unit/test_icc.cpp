@@ -359,6 +359,50 @@ TEST(IccCmyk, PerceptualIntentRefused) {
   gcol_icc_free(cmyk);
 }
 
+TEST(IccCmyk, DestinationCmykViaB2A) {
+  GCOL_ICC_Profile * cmyk = parse_named("cmyk_mft2.icc");
+  ASSERT_NE(cmyk, nullptr);
+
+  GCOL_Color_Info src;
+  gcol_color_info_default(&src);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&src, GCOL_PRIMARIES_SRGB));
+  src.transfer = GCOL_TRANSFER_LINEAR;
+
+  GCOL_Transform * to_cmyk = nullptr;
+  ASSERT_EQ(gcol_transform_create_to_icc(nullptr, &src, cmyk,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_REFLECTION, &to_cmyk),
+      GCOL_OK);
+
+  /* White linear RGB → near paper (low ink). */
+  float in_rgb[3] = {1.f, 1.f, 1.f};
+  float out_cmyk[4] = {1.f, 1.f, 1.f, 1.f};
+  GCOL_Sample_Layout rgb_layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  GCOL_Sample_Layout cmyk_layout = {GCOL_SAMPLE_FLOAT32, 4, GCOL_PIXEL_CMYK};
+  ASSERT_EQ(gcol_transform_apply(
+                to_cmyk, &rgb_layout, in_rgb, &cmyk_layout, out_cmyk, 1),
+      GCOL_OK);
+  EXPECT_LT(out_cmyk[0] + out_cmyk[1] + out_cmyk[2] + out_cmyk[3], 0.5f);
+
+  /* Round-trip through A2B should stay near white. */
+  GCOL_Transform * to_rgb = nullptr;
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &src,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_REFLECTION, &to_rgb),
+      GCOL_OK);
+  float back[3] = {0, 0, 0};
+  ASSERT_EQ(gcol_transform_apply(
+                to_rgb, &cmyk_layout, out_cmyk, &rgb_layout, back, 1),
+      GCOL_OK);
+  EXPECT_NEAR(back[0], 1.0, 0.25);
+  EXPECT_NEAR(back[1], 1.0, 0.25);
+  EXPECT_NEAR(back[2], 1.0, 0.25);
+
+  gcol_transform_free(to_cmyk);
+  gcol_transform_free(to_rgb);
+  gcol_icc_free(cmyk);
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

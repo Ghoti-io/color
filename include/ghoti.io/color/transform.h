@@ -126,6 +126,17 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
     GCOL_CMYK_Polarity cmyk_polarity, GCOL_Transform ** out);
 
 /**
+ * @brief Build a transform from @p src into a parsed ICC profile (BToA).
+ *
+ * Destination CMYK/LUT path. Relative colorimetric only. @p cmyk_polarity
+ * selects how CMYK bytes are written when the profile is CMYK.
+ */
+GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
+    const GCOL_Color_Info * src, const GCOL_ICC_Profile * dst,
+    GCOL_Rendering_Intent intent, uint32_t flags,
+    GCOL_CMYK_Polarity cmyk_polarity, GCOL_Transform ** out);
+
+/**
  * @brief Free a transform from ::gcol_transform_create.
  */
 GCOL_API void gcol_transform_free(GCOL_Transform * xform);

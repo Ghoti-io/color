@@ -161,6 +161,92 @@ def rgb_to_xyz_abs(r, g, b):
     return (X, Y, Z)
 
 
+def rgb_to_cmyk(r, g, b):
+    """Simple undercolour removal: K = min(CMY), then scale CMY."""
+    c = 1.0 - max(0.0, min(1.0, r))
+    m = 1.0 - max(0.0, min(1.0, g))
+    y = 1.0 - max(0.0, min(1.0, b))
+    k = min(c, m, y)
+    if k >= 1.0 - 1e-12:
+        return 0.0, 0.0, 0.0, 1.0
+    if k > 0.0:
+        c = (c - k) / (1.0 - k)
+        m = (m - k) / (1.0 - k)
+        y = (y - k) / (1.0 - k)
+    return c, m, y, k
+
+
+def xyz_to_rgb_abs(X, Y, Z):
+    """Inverse of rgb_to_xyz_abs (D50-adapted sRGB matrix)."""
+    # Inverse of columns (rx,gx,bx), (ry,gy,by), (rz,gz,bz).
+    # Hand-computed adjugate / det for the published matrix.
+    rx, ry, rz = 0.43607, 0.22249, 0.01392
+    gx, gy, gz = 0.38515, 0.71687, 0.09708
+    bx, by, bz = 0.14307, 0.06061, 0.71410
+    # 3x3 inverse
+    det = (
+        rx * (gy * bz - gz * by)
+        - gx * (ry * bz - rz * by)
+        + bx * (ry * gz - rz * gy)
+    )
+    inv = [
+        (gy * bz - gz * by) / det,
+        (bx * gz - gx * bz) / det,
+        (gx * by - bx * gy) / det,
+        (rz * by - ry * bz) / det,
+        (rx * bz - bx * rz) / det,
+        (bx * ry - rx * by) / det,
+        (ry * gz - rz * gy) / det,
+        (gx * rz - rx * gz) / det,
+        (rx * gy - gx * ry) / det,
+    ]
+    r = inv[0] * X + inv[1] * Y + inv[2] * Z
+    g = inv[3] * X + inv[4] * Y + inv[5] * Z
+    b = inv[6] * X + inv[7] * Y + inv[8] * Z
+    return r, g, b
+
+
+def encode_cmyk_u16(c, m, y, k) -> bytes:
+    out = bytearray()
+    for v in (c, m, y, k):
+        code = int(round(max(0.0, min(1.0, v)) * 65535.0))
+        out += struct.pack(">H", code)
+    return bytes(out)
+
+
+def tag_mft2_cmyk_b2a():
+    """lut16Type BToA: 3 in (XYZ PCS), 4 out (CMYK), grid=3.
+
+    Grid=3 so the D50 white point (PCS code ~0.5) sits on a sample rather
+    than halfway between black and a >1.0 corner on a 2-point grid.
+    """
+    grid = 3
+    in_ch, out_ch = 3, 4
+    mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
+    in_entries = 2
+    out_entries = 2
+    header = (
+        b"mft2"
+        + b"\0" * 4
+        + bytes([in_ch, out_ch, grid, 0])
+        + mat
+        + struct.pack(">HH", in_entries, out_entries)
+    )
+    tables_in = identity_u16(in_entries) * in_ch
+    scale = 65535.0 / 32768.0
+    clut = bytearray()
+    for xi in range(grid):
+        for yi in range(grid):
+            for zi in range(grid):
+                X = (xi / (grid - 1)) * scale
+                Y = (yi / (grid - 1)) * scale
+                Z = (zi / (grid - 1)) * scale
+                r, g, b = xyz_to_rgb_abs(X, Y, Z)
+                clut += encode_cmyk_u16(*rgb_to_cmyk(r, g, b))
+    tables_out = identity_u16(out_entries) * out_ch
+    return header + tables_in + bytes(clut) + tables_out
+
+
 def tag_mft2_cmyk():
     """lut16Type: 4 in, 3 out, grid=2, identity tables, subtractive CLUT."""
     grid = 2
@@ -261,6 +347,7 @@ def main() -> None:
             (b"cprt", tag_text("No copyright, use freely.")),
             (b"wtpt", tag_xyz(D50_XYZ)),
             (b"A2B1", tag_mft2_cmyk()),
+            (b"B2A1", tag_mft2_cmyk_b2a()),
         ],
         "Ghoti test CMYK mft2",
         profile_class=b"prtr",

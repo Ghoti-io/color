@@ -196,7 +196,7 @@ static GCOL_Result parse_mft(const GCOL_Allocator * alloc,
   uint8_t in_ch = tag[8];
   uint8_t out_ch = tag[9];
   uint8_t grid = tag[10];
-  if (in_ch < 1u || in_ch > 4u || out_ch < 1u || out_ch > 3u) {
+  if (in_ch < 1u || in_ch > 4u || out_ch < 1u || out_ch > 4u) {
     return GCOL_ERR_UNSUPPORTED;
   }
   if (grid < 2u) {
@@ -371,7 +371,7 @@ static GCOL_Result parse_mab(const GCOL_Allocator * alloc,
   }
   uint8_t in_ch = tag[8];
   uint8_t out_ch = tag[9];
-  if (in_ch < 1u || in_ch > 4u || out_ch < 1u || out_ch > 3u) {
+  if (in_ch < 1u || in_ch > 4u || out_ch < 1u || out_ch > 4u) {
     return GCOL_ERR_UNSUPPORTED;
   }
   uint32_t off_b = gcol_icc_read_u32(tag + 12);
@@ -637,6 +637,90 @@ GCOL_Result gcol_icc_lut_apply(const gcol_icc_lut_t * lut,
     for (uint8_t i = lut->output_chan; i < 3u; i++) {
       xyz[i] = 0.0;
     }
+  }
+  return GCOL_OK;
+}
+
+GCOL_Result gcol_icc_lut_apply_b2a(const gcol_icc_lut_t * lut,
+    const double xyz[3], double * device) {
+  if (!lut || !xyz || !device) {
+    return GCOL_ERR_INVALID;
+  }
+  if (lut->input_chan < 3u) {
+    return GCOL_ERR_UNSUPPORTED;
+  }
+
+  /* Absolute XYZ → ICC PCS code in [0,1]. */
+  double stage[4];
+  if (lut->pcs_lab) {
+    return GCOL_ERR_UNSUPPORTED; /* Lab PCS B2A deferred. */
+  }
+  const double scale = (lut->clut_precision == 1u) ? (255.0 / 128.0)
+                                                   : (65535.0 / 32768.0);
+  /* When B2A has no CLUT, curves already speak PCS values. */
+  if (lut->grid >= 2u && lut->clut_precision != 0u) {
+    for (int i = 0; i < 3; i++) {
+      stage[i] = clamp01(xyz[i] / scale);
+    }
+  } else {
+    for (int i = 0; i < 3; i++) {
+      stage[i] = clamp01(xyz[i]);
+    }
+  }
+  for (uint8_t i = 3; i < lut->input_chan; i++) {
+    stage[i] = 0.0;
+  }
+
+  for (uint8_t i = 0; i < lut->input_chan; i++) {
+    double v = stage[i];
+    if (lut->in_curves) {
+      GCOL_Result r = gcol_icc_curve_decode(&lut->in_curves[i], v, &v);
+      if (r != GCOL_OK) {
+        return r;
+      }
+    }
+    stage[i] = clamp01(v);
+  }
+
+  if (lut->has_matrix && lut->input_chan >= 3u) {
+    double t[3];
+    t[0] = lut->e[0] * stage[0] + lut->e[1] * stage[1] + lut->e[2] * stage[2];
+    t[1] = lut->e[3] * stage[0] + lut->e[4] * stage[1] + lut->e[5] * stage[2];
+    t[2] = lut->e[6] * stage[0] + lut->e[7] * stage[1] + lut->e[8] * stage[2];
+    stage[0] = t[0];
+    stage[1] = t[1];
+    stage[2] = t[2];
+  }
+
+  double mid[4] = {0, 0, 0, 0};
+  if (lut->grid >= 2u && lut->clut) {
+    clut_sample(lut, stage, mid);
+  } else {
+    for (uint8_t i = 0; i < lut->output_chan && i < 4u; i++) {
+      mid[i] = (i < lut->input_chan) ? stage[i] : 0.0;
+    }
+  }
+
+  if (lut->m_curves) {
+    for (uint8_t i = 0; i < lut->output_chan && i < 4u; i++) {
+      double v = mid[i];
+      GCOL_Result r = gcol_icc_curve_decode(&lut->m_curves[i], v, &v);
+      if (r != GCOL_OK) {
+        return r;
+      }
+      mid[i] = v;
+    }
+  }
+
+  for (uint8_t i = 0; i < lut->output_chan; i++) {
+    double v = clamp01(mid[i]);
+    if (lut->out_curves) {
+      GCOL_Result r = gcol_icc_curve_decode(&lut->out_curves[i], v, &v);
+      if (r != GCOL_OK) {
+        return r;
+      }
+    }
+    device[i] = clamp01(v);
   }
   return GCOL_OK;
 }
