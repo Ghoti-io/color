@@ -289,7 +289,7 @@ TEST(IccLut, LutGridLimitIsEnforced) {
   ASSERT_FALSE(bytes.empty());
   GCOL_Limits lim;
   gcol_limits_default(&lim);
-  lim.lut_grid = 1; /* fixture uses grid=2 */
+  lim.lut_grid = 1; /* fixture uses grid=5 */
   GCOL_ICC_Profile * p = nullptr;
   EXPECT_EQ(gcol_icc_parse(nullptr, &lim, bytes.data(), bytes.size(), &p),
       GCOL_ERR_LIMIT);
@@ -415,29 +415,43 @@ TEST(IccCmyk, DestinationCmykViaB2A) {
                   GCOL_CMYK_POLARITY_REFLECTION, &to_cmyk),
       GCOL_OK);
 
-  /* White linear RGB → near paper (low ink). */
-  float in_rgb[3] = {1.f, 1.f, 1.f};
-  float out_cmyk[4] = {1.f, 1.f, 1.f, 1.f};
-  GCOL_Sample_Layout rgb_layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
-  GCOL_Sample_Layout cmyk_layout = {GCOL_SAMPLE_FLOAT32, 4, GCOL_PIXEL_CMYK};
-  ASSERT_EQ(gcol_transform_apply(
-                to_cmyk, &rgb_layout, in_rgb, &cmyk_layout, out_cmyk, 1),
-      GCOL_OK);
-  EXPECT_LT(out_cmyk[0] + out_cmyk[1] + out_cmyk[2] + out_cmyk[3], 0.5f);
-
-  /* Round-trip through A2B should stay near white. */
   GCOL_Transform * to_rgb = nullptr;
   ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &src,
                   GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
                   GCOL_CMYK_POLARITY_REFLECTION, &to_rgb),
       GCOL_OK);
-  float back[3] = {0, 0, 0};
+
+  GCOL_Sample_Layout rgb_layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  GCOL_Sample_Layout cmyk_layout = {GCOL_SAMPLE_FLOAT32, 4, GCOL_PIXEL_CMYK};
+
+  /* Mid-grey is where denser (grid=5) CLUTs earn their keep. */
+  float mid[3] = {0.5f, 0.5f, 0.5f};
+  float mid_cmyk[4] = {0, 0, 0, 0};
+  float mid_back[3] = {0, 0, 0};
   ASSERT_EQ(gcol_transform_apply(
-                to_rgb, &cmyk_layout, out_cmyk, &rgb_layout, back, 1),
+                to_cmyk, &rgb_layout, mid, &cmyk_layout, mid_cmyk, 1),
       GCOL_OK);
-  EXPECT_NEAR(back[0], 1.0, 0.25);
-  EXPECT_NEAR(back[1], 1.0, 0.25);
-  EXPECT_NEAR(back[2], 1.0, 0.25);
+  ASSERT_EQ(gcol_transform_apply(
+                to_rgb, &cmyk_layout, mid_cmyk, &rgb_layout, mid_back, 1),
+      GCOL_OK);
+  EXPECT_NEAR(mid_back[0], 0.5, 0.05);
+  EXPECT_NEAR(mid_back[1], 0.5, 0.05);
+  EXPECT_NEAR(mid_back[2], 0.5, 0.05);
+
+  /* Paper white: low ink; round-trip within the matrix/subtractive mismatch. */
+  float white[3] = {1.f, 1.f, 1.f};
+  float paper[4] = {1.f, 1.f, 1.f, 1.f};
+  float white_back[3] = {0, 0, 0};
+  ASSERT_EQ(gcol_transform_apply(
+                to_cmyk, &rgb_layout, white, &cmyk_layout, paper, 1),
+      GCOL_OK);
+  EXPECT_LT(paper[0] + paper[1] + paper[2] + paper[3], 0.35f);
+  ASSERT_EQ(gcol_transform_apply(
+                to_rgb, &cmyk_layout, paper, &rgb_layout, white_back, 1),
+      GCOL_OK);
+  EXPECT_NEAR(white_back[0], 1.0, 0.18);
+  EXPECT_NEAR(white_back[1], 1.0, 0.18);
+  EXPECT_NEAR(white_back[2], 1.0, 0.18);
 
   gcol_transform_free(to_cmyk);
   gcol_transform_free(to_rgb);

@@ -8,10 +8,10 @@ library's own LUT code.
 
 Profiles
 --------
-* ``cmyk_mft2.icc`` — CMYK AToB1 lut16Type (mft2), 2-point CLUT, XYZ PCS,
-  plus a distinct AToB0 (XYZ×0.5) so perceptual and relative disagree, and
-  BToA1 for destination CMYK. Device (C,M,Y,K) in reflection polarity
-  (0=no ink) maps under A2B1 to absolute XYZ under D50 via a simple
+* ``cmyk_mft2.icc`` — CMYK AToB1 lut16Type (mft2), 5-point CLUT, XYZ PCS,
+  plus a distinct AToB0 (XYZ×0.5) and AToB2 (XYZ×0.75) so intents disagree,
+  and BToA1 (grid=5) for destination CMYK. Device (C,M,Y,K) in reflection
+  polarity (0=no ink) maps under A2B1 to absolute XYZ under D50 via a simple
   subtractive model. CLUT samples use the ICC XYZ PCS encoding (u1Fixed15
   for 16-bit). The polarity gate inverts storage bytes under
   GCOL_CMYK_POLARITY_INK before the LUT sees them.
@@ -218,12 +218,12 @@ def encode_cmyk_u16(c, m, y, k) -> bytes:
 
 
 def tag_mft2_cmyk_b2a():
-    """lut16Type BToA: 3 in (XYZ PCS), 4 out (CMYK), grid=3.
+    """lut16Type BToA: 3 in (XYZ PCS), 4 out (CMYK), grid=5.
 
-    Grid=3 so the D50 white point (PCS code ~0.5) sits on a sample rather
-    than halfway between black and a >1.0 corner on a 2-point grid.
+    Denser than the earlier grid=3 so mid-tones and D50 white interpolate
+    cleanly; round-trip tests can then use a tight tolerance.
     """
-    grid = 3
+    grid = 5
     in_ch, out_ch = 3, 4
     mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
     in_entries = 2
@@ -250,9 +250,9 @@ def tag_mft2_cmyk_b2a():
     return header + tables_in + bytes(clut) + tables_out
 
 
-def tag_mft2_cmyk():
-    """lut16Type: 4 in, 3 out, grid=2, identity tables, subtractive CLUT."""
-    grid = 2
+def _mft2_cmyk_a2b(xyz_scale: float):
+    """Shared A2B builder; xyz_scale distinguishes relative/perceptual/sat."""
+    grid = 5
     in_ch, out_ch = 4, 3
     mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
     in_entries = 2
@@ -275,71 +275,26 @@ def tag_mft2_cmyk():
                     y = yi / (grid - 1)
                     k = ki / (grid - 1)
                     r, g, b = subtractive_rgb(c, m, y, k)
-                    clut += encode_xyz_u16(*rgb_to_xyz_abs(r, g, b))
+                    X, Y, Z = rgb_to_xyz_abs(r, g, b)
+                    clut += encode_xyz_u16(
+                        xyz_scale * X, xyz_scale * Y, xyz_scale * Z)
     tables_out = identity_u16(out_entries) * out_ch
     return header + tables_in + bytes(clut) + tables_out
+
+
+def tag_mft2_cmyk():
+    """lut16Type: 4 in, 3 out, grid=5, identity tables, subtractive CLUT."""
+    return _mft2_cmyk_a2b(1.0)
 
 
 def tag_mft2_cmyk_perceptual():
-    """A2B0: same structure as A2B1 but XYZ scaled by 0.5 so intents disagree."""
-    grid = 2
-    in_ch, out_ch = 4, 3
-    mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
-    in_entries = 2
-    out_entries = 2
-    header = (
-        b"mft2"
-        + b"\0" * 4
-        + bytes([in_ch, out_ch, grid, 0])
-        + mat
-        + struct.pack(">HH", in_entries, out_entries)
-    )
-    tables_in = identity_u16(in_entries) * in_ch
-    clut = bytearray()
-    for ci in range(grid):
-        for mi in range(grid):
-            for yi in range(grid):
-                for ki in range(grid):
-                    c = ci / (grid - 1)
-                    m = mi / (grid - 1)
-                    y = yi / (grid - 1)
-                    k = ki / (grid - 1)
-                    r, g, b = subtractive_rgb(c, m, y, k)
-                    X, Y, Z = rgb_to_xyz_abs(r, g, b)
-                    clut += encode_xyz_u16(0.5 * X, 0.5 * Y, 0.5 * Z)
-    tables_out = identity_u16(out_entries) * out_ch
-    return header + tables_in + bytes(clut) + tables_out
+    """A2B0: XYZ scaled by 0.5 so perceptual disagrees with relative."""
+    return _mft2_cmyk_a2b(0.5)
 
 
 def tag_mft2_cmyk_saturation():
-    """A2B2: XYZ scaled by 0.75 so saturation disagrees with both other intents."""
-    grid = 2
-    in_ch, out_ch = 4, 3
-    mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
-    in_entries = 2
-    out_entries = 2
-    header = (
-        b"mft2"
-        + b"\0" * 4
-        + bytes([in_ch, out_ch, grid, 0])
-        + mat
-        + struct.pack(">HH", in_entries, out_entries)
-    )
-    tables_in = identity_u16(in_entries) * in_ch
-    clut = bytearray()
-    for ci in range(grid):
-        for mi in range(grid):
-            for yi in range(grid):
-                for ki in range(grid):
-                    c = ci / (grid - 1)
-                    m = mi / (grid - 1)
-                    y = yi / (grid - 1)
-                    k = ki / (grid - 1)
-                    r, g, b = subtractive_rgb(c, m, y, k)
-                    X, Y, Z = rgb_to_xyz_abs(r, g, b)
-                    clut += encode_xyz_u16(0.75 * X, 0.75 * Y, 0.75 * Z)
-    tables_out = identity_u16(out_entries) * out_ch
-    return header + tables_in + bytes(clut) + tables_out
+    """A2B2: XYZ scaled by 0.75 so saturation disagrees with both others."""
+    return _mft2_cmyk_a2b(0.75)
 
 
 def xyz_to_lab_enc(X, Y, Z):
