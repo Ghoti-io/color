@@ -69,6 +69,14 @@
 #define gcol_icc_write GHOTIIO_COLOR(gcol_icc_write)
 #define gcol_icc_bytes_free GHOTIIO_COLOR(gcol_icc_bytes_free)
 
+/* Colour maths (phase 1). */
+#define GCOL_Adaptation GHOTIIO_COLOR(GCOL_Adaptation)
+#define gcol_gamut_to_xyz GHOTIIO_COLOR(gcol_gamut_to_xyz)
+#define gcol_xyz_to_gamut GHOTIIO_COLOR(gcol_xyz_to_gamut)
+#define gcol_chromatic_adapt GHOTIIO_COLOR(gcol_chromatic_adapt)
+#define gcol_transfer_decode GHOTIIO_COLOR(gcol_transfer_decode)
+#define gcol_transfer_encode GHOTIIO_COLOR(gcol_transfer_encode)
+
 /// @endcond
 
 #endif /* GHOTI_IO_GCOL_NAMESPACE_H */

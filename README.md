@@ -11,19 +11,20 @@ space", not "what is this particular monitor doing today".
 
 ## What is implemented
 
-**Phase 0 is done.** The library owns the colour description (`GCOL_Color_Info`
-and the enums around it), the named-gamut and transfer-convention tables, and
-matrix/TRC ICC synthesis (`gcol_icc_write`). `libs/image` depends on this
-library for those types and no longer defines them. Parsing an arbitrary ICC
-profile and transforming samples are later phases; the plan is in the
-workspace at `planning/color.md`.
+**Phase 0 and phase 1 are done.** The library owns the colour description
+(`GCOL_Color_Info` and the enums around it), the named-gamut and
+transfer-convention tables, matrix/TRC ICC synthesis (`gcol_icc_write`), and
+colour maths (`gcol_gamut_to_xyz`, chromatic adaptation, transfer
+encode/decode). `libs/image` depends on this library for the description
+types. Parsing an arbitrary ICC profile and transforming samples are later
+phases; the plan is in the workspace at `planning/color.md`.
 
 | Phase | Content | Status |
 | --- | --- | --- |
 | scaffold | build, gates, result codes, version | **done** |
 | 0 | the colour *description* moves here from `libs/image` | **done** |
-| 1 | chromaticity to XYZ, chromatic adaptation, transfer curves | next |
-| 2 | ICC parse and write, matrix/TRC profiles | |
+| 1 | chromaticity to XYZ, chromatic adaptation, transfer curves | **done** |
+| 2 | ICC parse and write, matrix/TRC profiles | next |
 | 3 | LUT-based profiles, CMYK, ICC v4 | |
 | 4 | HDR: PQ, HLG, absolute luminance | |
 
