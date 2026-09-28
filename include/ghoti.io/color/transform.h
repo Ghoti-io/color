@@ -31,11 +31,13 @@
  * integer sample to float does not need a rounding rule. Values outside the
  * unit interval are clipped before encoding unless absolute HDR keeps them.
  *
- * Perceptual intent has no specification of its own. When an ICC profile
- * carries an A2B0/B2A0 table, requesting perceptual applies that table —
- * those bytes are the profile author's mapping. When no such table exists,
- * perceptual returns ::GCOL_ERR_UNSUPPORTED rather than inventing a gamut
- * map. Colorimetric intents are specification-defined.
+ * Perceptual and saturation intents have no specification of their own.
+ * When an ICC profile carries an A2B0/B2A0 (perceptual) or A2B2/B2A2
+ * (saturation) table, requesting that intent applies the table — those
+ * bytes are the profile author's mapping. When no such table exists, the
+ * intent returns ::GCOL_ERR_UNSUPPORTED rather than inventing a gamut map.
+ * Colorimetric intents are specification-defined; absolute colorimetric on
+ * the LUT path scales relative PCS XYZ by media_white / D50.
  */
 
 #ifndef GHOTI_IO_GCOL_TRANSFORM_H
@@ -121,7 +123,9 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
  * CMYK sources.
  *
  * Relative colorimetric prefers A2B1 (falling back to A2B0 when that is the
- * only AToB). Perceptual uses A2B0 only; without that table it is refused.
+ * only AToB). Absolute uses the same tables, then scales PCS XYZ by
+ * media_white / D50. Perceptual uses A2B0 only; saturation uses A2B2 only;
+ * without the matching table either is refused.
  */
 GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
     const GCOL_ICC_Profile * src, const GCOL_Color_Info * dst,
@@ -132,7 +136,8 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
  * @brief Build a transform from @p src into a parsed ICC profile (BToA).
  *
  * Destination CMYK/LUT path. Intent selection matches
- * ::gcol_transform_create_icc (B2A1 for relative, B2A0 for perceptual).
+ * ::gcol_transform_create_icc (B2A1 for relative/absolute, B2A0 for
+ * perceptual, B2A2 for saturation). Lab PCS B2A is supported.
  */
 GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
     const GCOL_Color_Info * src, const GCOL_ICC_Profile * dst,

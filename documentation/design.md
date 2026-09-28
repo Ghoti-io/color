@@ -65,13 +65,14 @@ Two things, stated rather than glossed.
 
 The v4 tail above is genuine work and will take phases.
 
-**Perceptual intent has no specification of its own.** A profile may still
-carry A2B0/B2A0 tables; applying those bytes under perceptual intent is
-honouring the profile, not inventing a mapping. Without those tables,
-perceptual returns `GCOL_ERR_UNSUPPORTED`. Inventing a silent default gamut
-map and calling it perceptual would be the wrong kind of helpful. Colorimetric
+**Perceptual and saturation intents have no specification of their own.** A
+profile may still carry A2B0/B2A0 or A2B2/B2A2 tables; applying those bytes
+under the matching intent is honouring the profile, not inventing a mapping.
+Without those tables, the intent returns `GCOL_ERR_UNSUPPORTED`. Inventing a
+silent default gamut map would be the wrong kind of helpful. Colorimetric
 intents do not have this problem: they are defined, and a disagreement there
-is a bug in one of the two implementations.
+is a bug in one of the two implementations. Absolute colorimetric on the LUT
+path uses the colorimetric tables and scales by media white / D50.
 
 ## Why it is not part of `libs/image`
 

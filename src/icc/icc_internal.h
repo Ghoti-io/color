@@ -109,10 +109,16 @@ struct GCOL_ICC_Profile {
   gcol_icc_lut_t * a2b;
   /** Perceptual AToB0 (device→PCS), when present. */
   gcol_icc_lut_t * a2b0;
+  /** Saturation AToB2 (device→PCS), when present. */
+  gcol_icc_lut_t * a2b2;
   /** Relative-colorimetric BToA1 (PCS→device), when present. */
   gcol_icc_lut_t * b2a;
   /** Perceptual BToA0 (PCS→device), when present. */
   gcol_icc_lut_t * b2a0;
+  /** Saturation BToA2 (PCS→device), when present. */
+  gcol_icc_lut_t * b2a2;
+  /** Media white point from wtpt, when present (D50 if absent). */
+  bool has_wtpt;
   unsigned char profile_id[16];
 };
 
@@ -121,8 +127,11 @@ bool gcol_icc_has_lut(const GCOL_ICC_Profile * profile);
 
 /**
  * Device→PCS LUT for @p intent.
- * Perceptual returns A2B0 only (no invented fallback). Relative prefers
- * A2B1 and may fall back to A2B0 when that is the only table (ICC-permitted).
+ * Perceptual returns A2B0 only; saturation returns A2B2 only (never invent
+ * a mapping). Relative prefers A2B1 and may fall back to A2B0 when that is
+ * the only table (ICC-permitted). Absolute uses the colorimetric tables
+ * (same selection as relative); the media-white scale is applied by the
+ * transform, not here.
  */
 const gcol_icc_lut_t * gcol_icc_a2b_for_intent(
     const GCOL_ICC_Profile * profile, GCOL_Rendering_Intent intent);

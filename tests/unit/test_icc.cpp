@@ -444,6 +444,148 @@ TEST(IccCmyk, DestinationCmykViaB2A) {
   gcol_icc_free(cmyk);
 }
 
+TEST(IccCmyk, SaturationWithoutTableRefused) {
+  GCOL_Color_Info src, dst;
+  gcol_color_info_default(&src);
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&src, GCOL_PRIMARIES_SRGB));
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_ADOBE_RGB));
+  src.transfer = GCOL_TRANSFER_SRGB;
+  dst.transfer = GCOL_TRANSFER_SRGB;
+  GCOL_Transform * x = nullptr;
+  EXPECT_EQ(gcol_transform_create(nullptr, &src, &dst, GCOL_INTENT_SATURATION,
+                  0, &x),
+      GCOL_ERR_UNSUPPORTED);
+}
+
+TEST(IccCmyk, SaturationUsesA2B2Table) {
+  GCOL_ICC_Profile * cmyk = parse_named("cmyk_mft2.icc");
+  ASSERT_NE(cmyk, nullptr);
+  GCOL_Color_Info dst;
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+
+  GCOL_Transform * rel = nullptr;
+  GCOL_Transform * sat = nullptr;
+  GCOL_Transform * per = nullptr;
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_REFLECTION, &rel),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_SATURATION, 0, GCOL_CMYK_POLARITY_REFLECTION,
+                  &sat),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_PERCEPTUAL, 0, GCOL_CMYK_POLARITY_REFLECTION,
+                  &per),
+      GCOL_OK);
+
+  float in[4] = {0.f, 0.f, 0.f, 0.f};
+  float out_rel[3] = {0, 0, 0};
+  float out_sat[3] = {0, 0, 0};
+  float out_per[3] = {0, 0, 0};
+  GCOL_Sample_Layout src_layout = {GCOL_SAMPLE_FLOAT32, 4, GCOL_PIXEL_CMYK};
+  GCOL_Sample_Layout dst_layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(
+      gcol_transform_apply(rel, &src_layout, in, &dst_layout, out_rel, 1),
+      GCOL_OK);
+  ASSERT_EQ(
+      gcol_transform_apply(sat, &src_layout, in, &dst_layout, out_sat, 1),
+      GCOL_OK);
+  ASSERT_EQ(
+      gcol_transform_apply(per, &src_layout, in, &dst_layout, out_per, 1),
+      GCOL_OK);
+  /* A2B2 is 0.75× relative; A2B0 is 0.5× — saturation sits between. */
+  EXPECT_LT(out_sat[1], out_rel[1] - 0.1f);
+  EXPECT_GT(out_sat[1], out_per[1] + 0.1f);
+
+  gcol_transform_free(rel);
+  gcol_transform_free(sat);
+  gcol_transform_free(per);
+  gcol_icc_free(cmyk);
+}
+
+TEST(IccLut, AbsoluteScalesByMediaWhite) {
+  GCOL_ICC_Profile * cmyk = parse_named("cmyk_abs.icc");
+  ASSERT_NE(cmyk, nullptr);
+  GCOL_Color_Info dst;
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+
+  GCOL_Transform * rel = nullptr;
+  GCOL_Transform * abs = nullptr;
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_REFLECTION, &rel),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_ABSOLUTE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_REFLECTION, &abs),
+      GCOL_OK);
+
+  float in[4] = {0.f, 0.f, 0.f, 0.f};
+  float out_rel[3] = {0, 0, 0};
+  float out_abs[3] = {0, 0, 0};
+  GCOL_Sample_Layout src_layout = {GCOL_SAMPLE_FLOAT32, 4, GCOL_PIXEL_CMYK};
+  GCOL_Sample_Layout dst_layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(
+      gcol_transform_apply(rel, &src_layout, in, &dst_layout, out_rel, 1),
+      GCOL_OK);
+  ASSERT_EQ(
+      gcol_transform_apply(abs, &src_layout, in, &dst_layout, out_abs, 1),
+      GCOL_OK);
+  /* Media Y=0.9 vs D50 Y=1 → absolute paper is dimmer than relative. */
+  EXPECT_NEAR(out_rel[1], 1.0, 0.05);
+  EXPECT_LT(out_abs[1], out_rel[1] - 0.05f);
+
+  gcol_transform_free(rel);
+  gcol_transform_free(abs);
+  gcol_icc_free(cmyk);
+}
+
+TEST(IccLut, LabPcsRoundTrip) {
+  GCOL_ICC_Profile * lab = parse_named("rgb_lab_mft2.icc");
+  ASSERT_NE(lab, nullptr);
+  EXPECT_EQ(gcol_icc_pcs(lab), 0x4C616220u); /* 'Lab ' */
+
+  GCOL_Color_Info rgb;
+  gcol_color_info_default(&rgb);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&rgb, GCOL_PRIMARIES_SRGB));
+  rgb.transfer = GCOL_TRANSFER_LINEAR;
+
+  GCOL_Transform * to_rgb = nullptr;
+  GCOL_Transform * to_dev = nullptr;
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, lab, &rgb,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_UNKNOWN, &to_rgb),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create_to_icc(nullptr, &rgb, lab,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_UNKNOWN, &to_dev),
+      GCOL_OK);
+
+  float white[3] = {1.f, 1.f, 1.f};
+  float device[3] = {0, 0, 0};
+  float back[3] = {0, 0, 0};
+  GCOL_Sample_Layout layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(
+      gcol_transform_apply(to_dev, &layout, white, &layout, device, 1),
+      GCOL_OK);
+  ASSERT_EQ(
+      gcol_transform_apply(to_rgb, &layout, device, &layout, back, 1),
+      GCOL_OK);
+  EXPECT_NEAR(back[0], 1.0, 0.35);
+  EXPECT_NEAR(back[1], 1.0, 0.35);
+  EXPECT_NEAR(back[2], 1.0, 0.35);
+
+  gcol_transform_free(to_rgb);
+  gcol_transform_free(to_dev);
+  gcol_icc_free(lab);
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

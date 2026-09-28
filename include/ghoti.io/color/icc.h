@@ -28,10 +28,12 @@
  * ::gcol_transform_create_icc; ::gcol_icc_to_color_info still returns
  * ::GCOL_ERR_UNSUPPORTED for them because a LUT is not a gamut+transfer pair.
  *
- * Perceptual intent has no independent specification. When a profile carries
- * A2B0/B2A0, those tables are applied under perceptual intent; when they are
- * absent, perceptual transforms return ::GCOL_ERR_UNSUPPORTED rather than
- * inventing a vendor mapping. Colorimetric intents are specification-defined.
+ * Perceptual and saturation intents have no independent specification. When a
+ * profile carries A2B0/B2A0 or A2B2/B2A2, those tables are applied under the
+ * matching intent; when they are absent, that intent returns
+ * ::GCOL_ERR_UNSUPPORTED rather than inventing a vendor mapping. Absolute
+ * colorimetric on the LUT path uses the colorimetric tables and scales by
+ * media white / D50. Colorimetric intents are specification-defined.
  */
 
 #ifndef GHOTI_IO_GCOL_ICC_H

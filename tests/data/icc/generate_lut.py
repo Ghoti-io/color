@@ -114,7 +114,7 @@ def encode_xyz_u16(X: float, Y: float, Z: float) -> bytes:
 
 
 def build_profile(space: bytes, tags, desc: str, version: int = 0x02100000,
-                  profile_class: bytes = b"prtr") -> bytes:
+                  profile_class: bytes = b"prtr", pcs: bytes = b"XYZ ") -> bytes:
     tags = list(tags)
     count = len(tags)
     table_size = 4 + count * 12
@@ -131,7 +131,7 @@ def build_profile(space: bytes, tags, desc: str, version: int = 0x02100000,
     h[8:12] = struct.pack(">I", version)
     h[12:16] = profile_class
     h[16:20] = space
-    h[20:24] = b"XYZ "
+    h[20:24] = pcs
     h[36:40] = b"acsp"
     h[64:68] = struct.pack(">I", 1)  # relative colorimetric
     h[68:80] = b"".join(s15f16(v) for v in D50_XYZ)
@@ -311,6 +311,145 @@ def tag_mft2_cmyk_perceptual():
     return header + tables_in + bytes(clut) + tables_out
 
 
+def tag_mft2_cmyk_saturation():
+    """A2B2: XYZ scaled by 0.75 so saturation disagrees with both other intents."""
+    grid = 2
+    in_ch, out_ch = 4, 3
+    mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
+    in_entries = 2
+    out_entries = 2
+    header = (
+        b"mft2"
+        + b"\0" * 4
+        + bytes([in_ch, out_ch, grid, 0])
+        + mat
+        + struct.pack(">HH", in_entries, out_entries)
+    )
+    tables_in = identity_u16(in_entries) * in_ch
+    clut = bytearray()
+    for ci in range(grid):
+        for mi in range(grid):
+            for yi in range(grid):
+                for ki in range(grid):
+                    c = ci / (grid - 1)
+                    m = mi / (grid - 1)
+                    y = yi / (grid - 1)
+                    k = ki / (grid - 1)
+                    r, g, b = subtractive_rgb(c, m, y, k)
+                    X, Y, Z = rgb_to_xyz_abs(r, g, b)
+                    clut += encode_xyz_u16(0.75 * X, 0.75 * Y, 0.75 * Z)
+    tables_out = identity_u16(out_entries) * out_ch
+    return header + tables_in + bytes(clut) + tables_out
+
+
+def xyz_to_lab_enc(X, Y, Z):
+    """ICC unit-interval Lab encoding used by this library's CLUT path."""
+    eps = 216.0 / 24389.0
+    kappa = 24389.0 / 27.0
+    xr, yr, zr = X / 0.9642, Y / 1.0, Z / 0.8249
+
+    def f(t):
+        return t ** (1.0 / 3.0) if t > eps else (kappa * t + 16.0) / 116.0
+
+    fx, fy, fz = f(xr), f(yr), f(zr)
+    L = 116.0 * fy - 16.0
+    a = 500.0 * (fx - fy)
+    b = 200.0 * (fy - fz)
+    return (
+        max(0.0, min(1.0, L / 100.0)),
+        max(0.0, min(1.0, (a + 128.0) / 255.0)),
+        max(0.0, min(1.0, (b + 128.0) / 255.0)),
+    )
+
+
+def encode_lab_u16(L_enc, a_enc, b_enc) -> bytes:
+    out = bytearray()
+    for v in (L_enc, a_enc, b_enc):
+        code = int(round(max(0.0, min(1.0, v)) * 65535.0))
+        out += struct.pack(">H", code)
+    return bytes(out)
+
+
+def encode_rgb_u16(r, g, b) -> bytes:
+    out = bytearray()
+    for v in (r, g, b):
+        code = int(round(max(0.0, min(1.0, v)) * 65535.0))
+        out += struct.pack(">H", code)
+    return bytes(out)
+
+
+def tag_mft2_rgb_lab_a2b():
+    """lut16Type RGB→Lab PCS, grid=2."""
+    grid = 2
+    in_ch, out_ch = 3, 3
+    mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
+    in_entries = 2
+    out_entries = 2
+    header = (
+        b"mft2"
+        + b"\0" * 4
+        + bytes([in_ch, out_ch, grid, 0])
+        + mat
+        + struct.pack(">HH", in_entries, out_entries)
+    )
+    tables_in = identity_u16(in_entries) * in_ch
+    clut = bytearray()
+    for ri in range(grid):
+        for gi in range(grid):
+            for bi in range(grid):
+                r = ri / (grid - 1)
+                g = gi / (grid - 1)
+                b = bi / (grid - 1)
+                clut += encode_lab_u16(*xyz_to_lab_enc(*rgb_to_xyz_abs(r, g, b)))
+    tables_out = identity_u16(out_entries) * out_ch
+    return header + tables_in + bytes(clut) + tables_out
+
+
+def tag_mft2_rgb_lab_b2a():
+    """lut16Type Lab PCS→RGB, grid=3 so mid a/b (~0.5) lands near white."""
+    grid = 3
+    in_ch, out_ch = 3, 3
+    mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
+    in_entries = 2
+    out_entries = 2
+    header = (
+        b"mft2"
+        + b"\0" * 4
+        + bytes([in_ch, out_ch, grid, 0])
+        + mat
+        + struct.pack(">HH", in_entries, out_entries)
+    )
+    tables_in = identity_u16(in_entries) * in_ch
+    clut = bytearray()
+    # Inverse of lab_encoded_to_xyz at each grid point.
+    eps = 216.0 / 24389.0
+    kappa = 24389.0 / 27.0
+    for li in range(grid):
+        for ai in range(grid):
+            for bi in range(grid):
+                L = (li / (grid - 1)) * 100.0
+                a = (ai / (grid - 1)) * 255.0 - 128.0
+                b = (bi / (grid - 1)) * 255.0 - 128.0
+                fy = (L + 16.0) / 116.0
+                fx = fy + a / 500.0
+                fz = fy - b / 200.0
+
+                def invf(ft):
+                    return (
+                        ft * ft * ft
+                        if ft * ft * ft > eps
+                        else (116.0 * ft - 16.0) / kappa
+                    )
+
+                xr = invf(fx)
+                yr = (L / kappa) if L <= kappa * eps else fy * fy * fy
+                zr = invf(fz)
+                X, Y, Z = xr * 0.9642, yr * 1.0, zr * 0.8249
+                clut += encode_rgb_u16(*xyz_to_rgb_abs(X, Y, Z))
+    tables_out = identity_u16(out_entries) * out_ch
+    return header + tables_in + bytes(clut) + tables_out
+
+
 def tag_mft1_rgb_identity():
     """lut8Type: 3 in, 3 out, grid=2, sRGB→XYZ CLUT."""
     grid = 2
@@ -382,6 +521,7 @@ def main() -> None:
             (b"wtpt", tag_xyz(D50_XYZ)),
             (b"A2B1", tag_mft2_cmyk()),
             (b"A2B0", tag_mft2_cmyk_perceptual()),
+            (b"A2B2", tag_mft2_cmyk_saturation()),
             (b"B2A1", tag_mft2_cmyk_b2a()),
         ],
         "Ghoti test CMYK mft2",
@@ -389,6 +529,39 @@ def main() -> None:
     )
     with open(os.path.join(OUT, "cmyk_mft2.icc"), "wb") as f:
         f.write(cmyk)
+
+    # Same CLUT as cmyk_mft2 but media white ≠ D50 so absolute ≠ relative.
+    warm_wtpt = (0.8500, 0.9000, 0.7000)
+    cmyk_abs = build_profile(
+        b"CMYK",
+        [
+            (b"desc", tag_desc("Ghoti test CMYK absolute")),
+            (b"cprt", tag_text("No copyright, use freely.")),
+            (b"wtpt", tag_xyz(warm_wtpt)),
+            (b"A2B1", tag_mft2_cmyk()),
+            (b"B2A1", tag_mft2_cmyk_b2a()),
+        ],
+        "Ghoti test CMYK absolute",
+        profile_class=b"prtr",
+    )
+    with open(os.path.join(OUT, "cmyk_abs.icc"), "wb") as f:
+        f.write(cmyk_abs)
+
+    rgb_lab = build_profile(
+        b"RGB ",
+        [
+            (b"desc", tag_desc("Ghoti test RGB Lab mft2")),
+            (b"cprt", tag_text("No copyright, use freely.")),
+            (b"wtpt", tag_xyz(D50_XYZ)),
+            (b"A2B1", tag_mft2_rgb_lab_a2b()),
+            (b"B2A1", tag_mft2_rgb_lab_b2a()),
+        ],
+        "Ghoti test RGB Lab mft2",
+        profile_class=b"mntr",
+        pcs=b"Lab ",
+    )
+    with open(os.path.join(OUT, "rgb_lab_mft2.icc"), "wb") as f:
+        f.write(rgb_lab)
 
     rgb_mft1 = build_profile(
         b"RGB ",
@@ -435,6 +608,8 @@ def main() -> None:
         f.write(rgb_para)
 
     print("wrote cmyk_mft2.icc (%d bytes)" % len(cmyk))
+    print("wrote cmyk_abs.icc (%d bytes)" % len(cmyk_abs))
+    print("wrote rgb_lab_mft2.icc (%d bytes)" % len(rgb_lab))
     print("wrote rgb_mft1.icc (%d bytes)" % len(rgb_mft1))
     print("wrote rgb_mab.icc (%d bytes)" % len(rgb_mab))
     print("wrote rgb_mab_para.icc (%d bytes)" % len(rgb_para))

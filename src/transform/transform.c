@@ -49,6 +49,11 @@ struct GCOL_Transform {
   int kind;
   /** Combined linear-RGB src → linear-RGB dst under relative colorimetric. */
   double matrix[9];
+  /**
+   * Absolute colorimetric scale applied to PCS XYZ after A2B / before B2A.
+   * Relative intents leave this as (1,1,1). Absolute uses media_white / D50.
+   */
+  double abs_scale[3];
   uint32_t flags;
   GCOL_CMYK_Polarity cmyk_polarity;
   /** Borrowed from the profile passed to create_icc; not owned. */
@@ -58,6 +63,24 @@ struct GCOL_Transform {
 };
 
 static const GCOL_Chromaticity gcol_pcs_d50 = {0.3457, 0.3585};
+/** ICC PCS illuminant XYZ (D50). */
+static const double gcol_pcs_d50_xyz[3] = {0.9642, 1.0000, 0.8249};
+
+static void abs_scale_from_profile(const GCOL_ICC_Profile * profile,
+    GCOL_Rendering_Intent intent, double out[3]) {
+  out[0] = out[1] = out[2] = 1.0;
+  if (intent != GCOL_INTENT_ABSOLUTE_COLORIMETRIC || !profile) {
+    return;
+  }
+  if (!profile->has_wtpt) {
+    return;
+  }
+  for (int i = 0; i < 3; i++) {
+    if (gcol_pcs_d50_xyz[i] > 0.0) {
+      out[i] = profile->wtpt[i] / gcol_pcs_d50_xyz[i];
+    }
+  }
+}
 
 static double clamp01(double v) {
   if (v < 0.0) {
@@ -321,6 +344,7 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
   x->dst_channels = 3;
   x->lut = NULL;
   x->cmyk_polarity = GCOL_CMYK_POLARITY_UNKNOWN;
+  x->abs_scale[0] = x->abs_scale[1] = x->abs_scale[2] = 1.0;
   gcol_mat3_mul(pcs_to_dst, src_to_pcs, x->matrix);
   *out = x;
   return GCOL_OK;
@@ -382,6 +406,7 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
   x->src_channels = lut->input_chan;
   x->dst_channels = 3;
   x->cmyk_polarity = cmyk_polarity;
+  abs_scale_from_profile(src, intent, x->abs_scale);
   memcpy(x->matrix, pcs_to_dst, sizeof(x->matrix));
   *out = x;
   return GCOL_OK;
@@ -439,6 +464,7 @@ GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
   x->src_channels = 3;
   x->dst_channels = lut->output_chan;
   x->cmyk_polarity = cmyk_polarity;
+  abs_scale_from_profile(dst, intent, x->abs_scale);
   memcpy(x->matrix, src_to_pcs, sizeof(x->matrix));
   *out = x;
   return GCOL_OK;
@@ -483,6 +509,10 @@ GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
       lin[2] = decode_to_relative(&xform->src, ch[2]);
       double xyz[3];
       gcol_mat3_vec(xform->matrix, lin, xyz);
+      /* Absolute: undo media→D50 mapping before the relative B2A table. */
+      xyz[0] /= xform->abs_scale[0];
+      xyz[1] /= xform->abs_scale[1];
+      xyz[2] /= xform->abs_scale[2];
       double device[4] = {0, 0, 0, 0};
       GCOL_Result lr = gcol_icc_lut_apply_b2a(xform->lut, xyz, device);
       if (lr != GCOL_OK) {
@@ -521,6 +551,10 @@ GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
       if (lr != GCOL_OK) {
         return lr;
       }
+      /* Absolute: re-apply media white after the relative A2B table. */
+      xyz[0] *= xform->abs_scale[0];
+      xyz[1] *= xform->abs_scale[1];
+      xyz[2] *= xform->abs_scale[2];
       gcol_mat3_vec(xform->matrix, xyz, lin_dst);
     } else {
       double lin[3];

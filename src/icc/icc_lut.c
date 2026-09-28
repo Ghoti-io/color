@@ -23,9 +23,10 @@
  *
  * ICC LUT tag parse and apply (mft1, mft2, mAB , mBA ).
  *
- * Colorimetric intents apply the CLUT as stored. Perceptual intent applies
- * A2B0/B2A0 when present; inventing a gamut map when those tags are absent
- * is refused at transform create (see design.md).
+ * Colorimetric intents apply the CLUT as stored. Perceptual applies
+ * A2B0/B2A0 when present; saturation applies A2B2/B2A2 when present;
+ * inventing a gamut map when those tags are absent is refused at transform
+ * create (see design.md).
  */
 
 #include "icc_lut.h"
@@ -545,11 +546,11 @@ static void lab_encoded_to_xyz(const double lab_enc[3], double xyz[3]) {
   const double L = lab_enc[0] * 100.0;
   const double a = lab_enc[1] * 255.0 - 128.0;
   const double b = lab_enc[2] * 255.0 - 128.0;
+  const double eps = 216.0 / 24389.0;
+  const double kappa = 24389.0 / 27.0;
   const double fy = (L + 16.0) / 116.0;
   const double fx = fy + a / 500.0;
   const double fz = fy - b / 200.0;
-  const double eps = 216.0 / 24389.0;
-  const double kappa = 24389.0 / 27.0;
   double xr = (fx * fx * fx > eps) ? fx * fx * fx : (116.0 * fx - 16.0) / kappa;
   double yr = (L > kappa * eps) ? fy * fy * fy : L / kappa;
   double zr = (fz * fz * fz > eps) ? fz * fz * fz : (116.0 * fz - 16.0) / kappa;
@@ -557,6 +558,23 @@ static void lab_encoded_to_xyz(const double lab_enc[3], double xyz[3]) {
   xyz[0] = xr * 0.9642;
   xyz[1] = yr * 1.0000;
   xyz[2] = zr * 0.8249;
+}
+
+static void xyz_to_lab_encoded(const double xyz[3], double lab_enc[3]) {
+  const double eps = 216.0 / 24389.0;
+  const double kappa = 24389.0 / 27.0;
+  double xr = xyz[0] / 0.9642;
+  double yr = xyz[1] / 1.0000;
+  double zr = xyz[2] / 0.8249;
+  double fx = (xr > eps) ? cbrt(xr) : (kappa * xr + 16.0) / 116.0;
+  double fy = (yr > eps) ? cbrt(yr) : (kappa * yr + 16.0) / 116.0;
+  double fz = (zr > eps) ? cbrt(zr) : (kappa * zr + 16.0) / 116.0;
+  const double L = 116.0 * fy - 16.0;
+  const double a = 500.0 * (fx - fy);
+  const double b = 200.0 * (fy - fz);
+  lab_enc[0] = clamp01(L / 100.0);
+  lab_enc[1] = clamp01((a + 128.0) / 255.0);
+  lab_enc[2] = clamp01((b + 128.0) / 255.0);
 }
 
 GCOL_Result gcol_icc_lut_apply(const gcol_icc_lut_t * lut,
@@ -651,13 +669,14 @@ GCOL_Result gcol_icc_lut_apply_b2a(const gcol_icc_lut_t * lut,
   /* Absolute XYZ → ICC PCS code in [0,1]. */
   double stage[4];
   if (lut->pcs_lab) {
-    return GCOL_ERR_UNSUPPORTED; /* Lab PCS B2A deferred. */
-  }
-  /* Same encoding as A2B: 8-bit /128, else u1Fixed15. No-CLUT B2A is 16-bit. */
-  const double scale = (lut->clut_precision == 1u) ? (255.0 / 128.0)
-                                                   : (65535.0 / 32768.0);
-  for (int i = 0; i < 3; i++) {
-    stage[i] = clamp01(xyz[i] / scale);
+    xyz_to_lab_encoded(xyz, stage);
+  } else {
+    /* Same encoding as A2B: 8-bit /128, else u1Fixed15. No-CLUT B2A is 16-bit. */
+    const double scale = (lut->clut_precision == 1u) ? (255.0 / 128.0)
+                                                     : (65535.0 / 32768.0);
+    for (int i = 0; i < 3; i++) {
+      stage[i] = clamp01(xyz[i] / scale);
+    }
   }
   for (uint8_t i = 3; i < lut->input_chan; i++) {
     stage[i] = 0.0;
