@@ -1,6 +1,7 @@
 # Design
 
-**Status:** design. Nothing below phase 0 is implemented; the scaffold is.
+**Status:** design. Phase 0 (description types and ICC synthesis) is
+implemented; phases 1–4 are not.
 
 This page says what this library is for, what it refuses to be, and why it
 does not wrap the reference implementation. The phase plan lives outside this

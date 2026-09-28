@@ -49,6 +49,26 @@
 #define gcol_version_number GHOTIIO_COLOR(gcol_version_number)
 #define gcol_version_string GHOTIIO_COLOR(gcol_version_string)
 
+
+/* Description types and functions (phase 0). */
+#define GCOL_Chromaticity GHOTIIO_COLOR(GCOL_Chromaticity)
+#define GCOL_Gamut GHOTIIO_COLOR(GCOL_Gamut)
+#define GCOL_Primaries GHOTIIO_COLOR(GCOL_Primaries)
+#define GCOL_Transfer GHOTIIO_COLOR(GCOL_Transfer)
+#define GCOL_Reference GHOTIIO_COLOR(GCOL_Reference)
+#define GCOL_Sample_Scale GHOTIIO_COLOR(GCOL_Sample_Scale)
+#define GCOL_Rendering_Intent GHOTIIO_COLOR(GCOL_Rendering_Intent)
+#define GCOL_CMYK_Polarity GHOTIIO_COLOR(GCOL_CMYK_Polarity)
+#define GCOL_Color_Info GHOTIIO_COLOR(GCOL_Color_Info)
+
+#define gcol_gamut_identify GHOTIIO_COLOR(gcol_gamut_identify)
+#define gcol_gamut_named GHOTIIO_COLOR(gcol_gamut_named)
+#define gcol_color_info_set_gamut GHOTIIO_COLOR(gcol_color_info_set_gamut)
+#define gcol_transfer_conventions GHOTIIO_COLOR(gcol_transfer_conventions)
+#define gcol_color_info_default GHOTIIO_COLOR(gcol_color_info_default)
+#define gcol_icc_write GHOTIIO_COLOR(gcol_icc_write)
+#define gcol_icc_bytes_free GHOTIIO_COLOR(gcol_icc_bytes_free)
+
 /// @endcond
 
 #endif /* GHOTI_IO_GCOL_NAMESPACE_H */
