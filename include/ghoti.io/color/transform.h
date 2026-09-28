@@ -1,0 +1,116 @@
+/*
+ * SPDX-License-Identifier: LGPL-3.0-only
+ *
+ * Copyright (C) 2026 Corey Pennycuff
+ *
+ * This file is part of Ghoti.io Color.
+ *
+ * Ghoti.io Color is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * Ghoti.io Color is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+ * License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * @file transform.h
+ *
+ * Pixel transforms between two colour descriptions.
+ *
+ * A ::GCOL_Transform is immutable after ::gcol_transform_create returns and
+ * may be shared across threads. Creation itself is not synchronised. A
+ * caller-supplied allocator must be safe for concurrent use if creation races.
+ *
+ * Narrowing from float to an integer sample truncates; widening from an
+ * integer sample to float does not need a rounding rule. Values outside the
+ * unit interval are clipped before encoding.
+ */
+
+#ifndef GHOTI_IO_GCOL_TRANSFORM_H
+#define GHOTI_IO_GCOL_TRANSFORM_H
+
+#include <ghoti.io/color/macros.h>
+
+#include <ghoti.io/color/allocator.h>
+#include <ghoti.io/color/color.h>
+#include <ghoti.io/color/core.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief Storage type of each colour sample in a buffer.
+ */
+typedef enum {
+  GCOL_SAMPLE_UINT8 = 0, ///< Interleaved 0..255.
+  GCOL_SAMPLE_FLOAT32,   ///< Interleaved unit-interval float.
+  GCOL_SAMPLE_FLOAT64,   ///< Interleaved unit-interval double.
+  GCOL_SAMPLE_TYPE_COUNT
+} GCOL_Sample_Type;
+
+/**
+ * @brief How samples sit in memory for ::gcol_transform_apply.
+ *
+ * Interleaved only. @a channel_count of 3 is RGB; 4 is RGBA and the alpha
+ * channel is copied through unchanged. Nothing here describes compression,
+ * subsampling, or palettes - that stays in libs/image.
+ */
+typedef struct GCOL_Sample_Layout {
+  GCOL_Sample_Type type;
+  unsigned channel_count; ///< 3 or 4.
+} GCOL_Sample_Layout;
+
+/**
+ * @brief Opaque transform between two colour spaces.
+ */
+typedef struct GCOL_Transform GCOL_Transform;
+
+/** Clip out-of-gamut linear RGB to [0, 1] before encoding (default on). */
+#define GCOL_TRANSFORM_CLIP 1u
+
+/**
+ * @brief Build a transform from @p src into @p dst.
+ *
+ * Phase 2 supports matrix/TRC RGB descriptions under relative colorimetric
+ * intent (PCS XYZ D50). Other intents return ::GCOL_ERR_UNSUPPORTED.
+ *
+ * @param alloc Allocator, or NULL for the default.
+ * @param src Source description. Must state primaries, white, and transfer.
+ * @param dst Destination description; same requirements.
+ * @param intent Rendering intent.
+ * @param flags Bitwise-or of GCOL_TRANSFORM_* flags; 0 means CLIP.
+ * @param out Receives the transform. Free with ::gcol_transform_free.
+ */
+GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
+    const GCOL_Color_Info * src, const GCOL_Color_Info * dst,
+    GCOL_Rendering_Intent intent, uint32_t flags, GCOL_Transform ** out);
+
+/**
+ * @brief Free a transform from ::gcol_transform_create.
+ */
+GCOL_API void gcol_transform_free(GCOL_Transform * xform);
+
+/**
+ * @brief Convert @p pixel_count pixels from @p src into @p dst.
+ *
+ * Buffers are interleaved per ::GCOL_Sample_Layout. Source and destination
+ * layouts may differ in type and in whether alpha is present.
+ */
+GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
+    const GCOL_Sample_Layout * src_layout, const void * src,
+    const GCOL_Sample_Layout * dst_layout, void * dst, size_t pixel_count);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* GHOTI_IO_GCOL_TRANSFORM_H */

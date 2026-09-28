@@ -21,15 +21,7 @@
 /**
  * @file core.h
  *
- * Result codes and the version this build reports.
- *
- * There is no GCOL_Limits here yet, and its absence is deliberate.
- * CONVENTIONS.md section 5 says every parser takes one, and this library will
- * have a parser - an ICC profile is the obvious unbounded input, with a tag
- * count, a curve sample count and a LUT grid size all worth capping.  None of
- * those is capped today because nothing parses yet, and a cap nothing checks
- * is not a promise.  The struct arrives in the commit that enforces its first
- * field.  See documentation/design.md.
+ * Result codes, parse limits, and the version this build reports.
  */
 
 #ifndef GHOTI_IO_GCOL_CORE_H
@@ -95,6 +87,38 @@ GCOL_API const char * gcol_version_string(void);
  * @return `(major << 16) | (minor << 8) | patch`.
  */
 GCOL_API unsigned gcol_version_number(void);
+
+/** Default ::GCOL_Limits.tag_count. */
+#define GCOL_LIMITS_DEFAULT_TAG_COUNT 256u
+
+/** Default ::GCOL_Limits.curve_samples. */
+#define GCOL_LIMITS_DEFAULT_CURVE_SAMPLES 65536u
+
+/** Default ::GCOL_Limits.profile_bytes: 16 MiB. */
+#define GCOL_LIMITS_DEFAULT_PROFILE_BYTES (16u * 1024u * 1024u)
+
+/** Default ::GCOL_Limits.lut_grid (phase 3; enforced when LUTs land). */
+#define GCOL_LIMITS_DEFAULT_LUT_GRID 256u
+
+/**
+ * @brief Caps for unbounded quantities in an ICC profile.
+ *
+ * Every parser takes one; NULL means ::gcol_limits_default(). A field of 0
+ * means the corresponding default above. Exceeding a stated (or default) cap
+ * is ::GCOL_ERR_LIMIT, never a silent truncate.
+ */
+typedef struct GCOL_Limits {
+  size_t tag_count;     ///< Max entries in the tag table.
+  size_t curve_samples; ///< Max samples in one curv/para tag.
+  size_t profile_bytes; ///< Max profile size in bytes.
+  size_t lut_grid;      ///< Max LUT grid points per axis (phase 3).
+  uint8_t _reserved[16];
+} GCOL_Limits;
+
+/**
+ * @brief Fill @p limits with the built-in defaults.
+ */
+GCOL_API void gcol_limits_default(GCOL_Limits * limits);
 
 #ifdef __cplusplus
 }

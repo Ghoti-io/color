@@ -77,6 +77,29 @@
 #define gcol_transfer_decode GHOTIIO_COLOR(gcol_transfer_decode)
 #define gcol_transfer_encode GHOTIIO_COLOR(gcol_transfer_encode)
 
+/* ICC parse and transforms (phase 2). */
+#define GCOL_Limits GHOTIIO_COLOR(GCOL_Limits)
+#define GCOL_ICC_Profile GHOTIIO_COLOR(GCOL_ICC_Profile)
+#define GCOL_Sample_Type GHOTIIO_COLOR(GCOL_Sample_Type)
+#define GCOL_Sample_Layout GHOTIIO_COLOR(GCOL_Sample_Layout)
+#define GCOL_Transform GHOTIIO_COLOR(GCOL_Transform)
+
+#define gcol_limits_default GHOTIIO_COLOR(gcol_limits_default)
+#define gcol_icc_parse GHOTIIO_COLOR(gcol_icc_parse)
+#define gcol_icc_free GHOTIIO_COLOR(gcol_icc_free)
+#define gcol_icc_version GHOTIIO_COLOR(gcol_icc_version)
+#define gcol_icc_class GHOTIIO_COLOR(gcol_icc_class)
+#define gcol_icc_data_space GHOTIIO_COLOR(gcol_icc_data_space)
+#define gcol_icc_pcs GHOTIIO_COLOR(gcol_icc_pcs)
+#define gcol_icc_intent GHOTIIO_COLOR(gcol_icc_intent)
+#define gcol_icc_description GHOTIIO_COLOR(gcol_icc_description)
+#define gcol_icc_is_matrix_trc GHOTIIO_COLOR(gcol_icc_is_matrix_trc)
+#define gcol_icc_profile_id GHOTIIO_COLOR(gcol_icc_profile_id)
+#define gcol_icc_to_color_info GHOTIIO_COLOR(gcol_icc_to_color_info)
+#define gcol_transform_create GHOTIIO_COLOR(gcol_transform_create)
+#define gcol_transform_free GHOTIIO_COLOR(gcol_transform_free)
+#define gcol_transform_apply GHOTIIO_COLOR(gcol_transform_apply)
+
 /// @endcond
 
 #endif /* GHOTI_IO_GCOL_NAMESPACE_H */

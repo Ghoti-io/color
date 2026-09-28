@@ -21,7 +21,10 @@
 /**
  * @file icc.h
  *
- * ICC profile synthesis (matrix/TRC) from a colour description.
+ * ICC profile parse, synthesise, and bridge to ::GCOL_Color_Info.
+ *
+ * Phase 2 reads ICC v2 matrix/TRC RGB (and grayscale) profiles. LUT-based
+ * and v4 pipelines are later phases and return ::GCOL_ERR_UNSUPPORTED.
  */
 
 #ifndef GHOTI_IO_GCOL_ICC_H
@@ -32,11 +35,98 @@
 #include <ghoti.io/color/allocator.h>
 #include <ghoti.io/color/color.h>
 #include <ghoti.io/color/core.h>
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @brief Opaque parsed ICC profile.
+ */
+typedef struct GCOL_ICC_Profile GCOL_ICC_Profile;
+
+/**
+ * @brief Parse an ICC profile from @p bytes.
+ *
+ * Enforces ::GCOL_Limits (tag count, curve samples, profile size). Matrix/TRC
+ * RGB and grayscale profiles are accepted; others return
+ * ::GCOL_ERR_UNSUPPORTED after a successful header/tag-table parse only when
+ * the class or colour space is known but not yet handled - a truncated or
+ * contradictory tag table is ::GCOL_ERR_CORRUPT.
+ *
+ * @param alloc Allocator for the returned object, or NULL for the default.
+ * @param limits Caps, or NULL for defaults.
+ * @param bytes Profile bytes. Copied; the caller may free them afterwards.
+ * @param size Byte length of @p bytes.
+ * @param out Receives the profile. Free with ::gcol_icc_free.
+ */
+GCOL_API GCOL_Result gcol_icc_parse(const GCOL_Allocator * alloc,
+    const GCOL_Limits * limits, const void * bytes, size_t size,
+    GCOL_ICC_Profile ** out);
+
+/**
+ * @brief Free a profile from ::gcol_icc_parse.
+ */
+GCOL_API void gcol_icc_free(GCOL_ICC_Profile * profile);
+
+/**
+ * @brief Profile version packed as in the header (e.g. 0x02100000 for 2.1).
+ */
+GCOL_API uint32_t gcol_icc_version(const GCOL_ICC_Profile * profile);
+
+/**
+ * @brief Profile class four-character code (e.g. 'mntr').
+ */
+GCOL_API uint32_t gcol_icc_class(const GCOL_ICC_Profile * profile);
+
+/**
+ * @brief Colour space of data ('RGB ', 'GRAY', …).
+ */
+GCOL_API uint32_t gcol_icc_data_space(const GCOL_ICC_Profile * profile);
+
+/**
+ * @brief Profile connection space ('XYZ ' or 'Lab ').
+ */
+GCOL_API uint32_t gcol_icc_pcs(const GCOL_ICC_Profile * profile);
+
+/**
+ * @brief Header rendering intent.
+ */
+GCOL_API GCOL_Rendering_Intent gcol_icc_intent(
+    const GCOL_ICC_Profile * profile);
+
+/**
+ * @brief ASCII description from the desc tag, or NULL if absent.
+ */
+GCOL_API const char * gcol_icc_description(const GCOL_ICC_Profile * profile);
+
+/**
+ * @brief True when the profile is matrix/TRC (not LUT-based).
+ */
+GCOL_API bool gcol_icc_is_matrix_trc(const GCOL_ICC_Profile * profile);
+
+/**
+ * @brief ICC profile ID (MD5 with flags, intent, and ID fields zeroed).
+ *
+ * Writes 16 bytes. All-zero means the profile did not carry a computed ID
+ * and this library left the field unpopulated in a write; a parse always
+ * recomputes it.
+ */
+GCOL_API GCOL_Result gcol_icc_profile_id(
+    const GCOL_ICC_Profile * profile, unsigned char out[16]);
+
+/**
+ * @brief Recover a colour description from a matrix/TRC profile.
+ *
+ * RGB matrix/TRC profiles fill gamut (primaries and white) and transfer.
+ * Grayscale matrix/TRC fills transfer only. LUT profiles and other classes
+ * return ::GCOL_ERR_UNSUPPORTED.
+ */
+GCOL_API GCOL_Result gcol_icc_to_color_info(
+    const GCOL_ICC_Profile * profile, GCOL_Color_Info * out);
 
 /**
  * @brief Write an ICC profile that says what @p info says.

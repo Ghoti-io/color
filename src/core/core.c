@@ -32,6 +32,8 @@
 
 #include <ghoti.io/color/core.h>
 
+#include <string.h>
+
 const char * gcol_result_string(GCOL_Result result) {
   switch (result) {
     case GCOL_OK:
@@ -56,4 +58,15 @@ const char * gcol_result_string(GCOL_Result result) {
       break;
   }
   return "Unknown error";
+}
+
+GCOL_API void gcol_limits_default(GCOL_Limits * limits) {
+  if (!limits) {
+    return;
+  }
+  memset(limits, 0, sizeof(*limits));
+  limits->tag_count = GCOL_LIMITS_DEFAULT_TAG_COUNT;
+  limits->curve_samples = GCOL_LIMITS_DEFAULT_CURVE_SAMPLES;
+  limits->profile_bytes = GCOL_LIMITS_DEFAULT_PROFILE_BYTES;
+  limits->lut_grid = GCOL_LIMITS_DEFAULT_LUT_GRID;
 }

@@ -11,20 +11,21 @@ space", not "what is this particular monitor doing today".
 
 ## What is implemented
 
-**Phase 0 and phase 1 are done.** The library owns the colour description
+**Phase 0 through phase 2 are done.** The library owns the colour description
 (`GCOL_Color_Info` and the enums around it), the named-gamut and
-transfer-convention tables, matrix/TRC ICC synthesis (`gcol_icc_write`), and
-colour maths (`gcol_gamut_to_xyz`, chromatic adaptation, transfer
-encode/decode). `libs/image` depends on this library for the description
-types. Parsing an arbitrary ICC profile and transforming samples are later
-phases; the plan is in the workspace at `planning/color.md`.
+transfer-convention tables, matrix/TRC ICC synthesis and parse
+(`gcol_icc_write` / `gcol_icc_parse`), colour maths, and relative-colorimetric
+RGB↔RGB transforms (`gcol_transform_create` / `gcol_transform_apply`).
+`libs/image` depends on this library for the description types. LUT profiles,
+CMYK, and HDR transfers are later phases; the plan is in the workspace at
+`planning/color.md`.
 
 | Phase | Content | Status |
 | --- | --- | --- |
 | scaffold | build, gates, result codes, version | **done** |
 | 0 | the colour *description* moves here from `libs/image` | **done** |
 | 1 | chromaticity to XYZ, chromatic adaptation, transfer curves | **done** |
-| 2 | ICC parse and write, matrix/TRC profiles | next |
+| 2 | ICC parse and write, matrix/TRC profiles, transforms | **done** |
 | 3 | LUT-based profiles, CMYK, ICC v4 | |
 | 4 | HDR: PQ, HLG, absolute luminance | |
 
@@ -73,8 +74,8 @@ make help                 # every target
 
 ## Dependencies
 
-`cutil`, for the allocator interface. `security` joins it at phase 2, for the
-MD5 an ICC profile identifier is defined as.
+`cutil`, for the allocator interface, and `security`, for the MD5 an ICC
+profile identifier is defined as.
 
 ## Documentation
 

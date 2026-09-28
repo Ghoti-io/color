@@ -200,6 +200,16 @@ endif
 endif
 INCLUDE += $(CUTIL_CFLAGS)
 
+SECURITY_PC ?= ghoti.io-security$(BRANCH)
+SECURITY_CFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_LOOKUP_PATH) pkg-config --cflags $(SECURITY_PC) 2>/dev/null)
+SECURITY_LIBS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_LOOKUP_PATH) pkg-config --libs $(SECURITY_PC) 2>/dev/null)
+ifeq ($(strip $(SECURITY_CFLAGS)),)
+ifndef SKIP_DEP_CHECK
+$(error ghoti.io-security was not found by pkg-config. Run ./bootstrap.sh at the root of the workspace - two levels up, the directory holding libs/ - to build and install the suite into a local prefix, then pass the same PREFIX here - or point PKG_CONFIG_PATH at the directory holding its .pc file. There is deliberately no sibling-checkout fallback. Color needs security from phase 2 for ICC profile identifiers.)
+endif
+endif
+INCLUDE += $(SECURITY_CFLAGS)
+
 SOURCES := $(shell find src -type f -name '*.c')
 LIBOBJECTS := $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SOURCES))
 
@@ -219,7 +229,7 @@ TEST_HELPER_OBJ := $(patsubst tests/%.cpp,$(OBJ_DIR)/tests/%.o,$(TEST_HELPER_SRC
 # dropped. The archive is a normal prerequisite of every test, so a clean
 # tree builds it; the .so is order-only because check-symbols wants it and
 # the tests do not link it.
-COLORLIBRARY := -Wl,--whole-archive $(APP_DIR)/$(STATIC_TARGET) -Wl,--no-whole-archive $(CUTIL_LIBS)
+COLORLIBRARY := -Wl,--whole-archive $(APP_DIR)/$(STATIC_TARGET) -Wl,--no-whole-archive $(SECURITY_LIBS) $(CUTIL_LIBS)
 
 ifeq ($(OS_NAME), Windows)
 TEST_LDFLAGS := -Wl,--wrap=__mingw_fprintf
@@ -281,7 +291,7 @@ $(OBJ_DIR)/%.o: src/%.c $(FLAGS_STAMP) | $(LIBVER_GEN)
 
 $(APP_DIR)/$(TARGET): $(LIBOBJECTS)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -shared -o $@ $^ $(LDFLAGS) $(CUTIL_LIBS) $(OS_SPECIFIC_LIBRARY_NAME_FLAG)
+	$(CXX) $(CXXFLAGS) -shared -o $@ $^ $(LDFLAGS) $(SECURITY_LIBS) $(CUTIL_LIBS) $(OS_SPECIFIC_LIBRARY_NAME_FLAG)
 ifeq ($(OS_NAME), Linux)
 	@ln -f -s $(TARGET) $(APP_DIR)/$(SO_NAME)
 	@ln -f -s $(SO_NAME) $(APP_DIR)/$(BASE_NAME)
@@ -527,7 +537,7 @@ ASAN_DEPFILES := $(ASAN_LIBOBJECTS:.o=.d) \
     $(foreach pair,$(TEST_PAIRS),$(ASAN_OBJ_DIR)/tests/$(basename $(notdir $(word 1,$(subst |, ,$(pair))))).d)
 -include $(ASAN_DEPFILES)
 ASAN_ARCHIVE := $(ASAN_APP_DIR)/$(STATIC_TARGET)
-ASAN_COLORLIBRARY := -Wl,--whole-archive $(ASAN_ARCHIVE) -Wl,--no-whole-archive $(CUTIL_LIBS)
+ASAN_COLORLIBRARY := -Wl,--whole-archive $(ASAN_ARCHIVE) -Wl,--no-whole-archive $(SECURITY_LIBS) $(CUTIL_LIBS)
 ASAN_CFLAGS := $(CFLAGS) $(ASAN_UBSAN_FLAGS) -DGCOL_BUILD
 ASAN_CXXFLAGS := $(CXXFLAGS) $(ASAN_UBSAN_FLAGS)
 ASAN_LDFLAGS := $(LDFLAGS) $(ASAN_UBSAN_FLAGS)
@@ -607,7 +617,7 @@ $$(FUZZ_APP_DIR)/$1: tests/fuzz/$1.cpp $$(FUZZ_OBJECTS) $$(FUZZ_FLAGS_STAMP) | $
 	fi
 	@mkdir -p $$(@D) $$(FUZZ_CORPUS)/$2
 	$$(FUZZ_CXX) $$(FUZZ_BIN_FLAGS) -std=c++20 -w $$(INCLUDE) \
-		-o $$@ $$< $$(FUZZ_OBJECTS) $(CUTIL_LIBS)
+		-o $$@ $$< $$(FUZZ_OBJECTS) $(SECURITY_LIBS) $(CUTIL_LIBS)
 
 fuzz-run-$2: $$(FUZZ_APP_DIR)/$1 ## Run the $2 fuzzer for $$(FUZZ_TIME) seconds
 	@mkdir -p $$(FUZZ_CORPUS)/$2
@@ -641,7 +651,7 @@ fuzz-clean: ## Remove the fuzz build
 ####################################################################
 
 LDCONF_INSTALL_PATH ?= /etc/ld.so.conf.d
-PC_REQUIRES := $(CUTIL_PC)
+PC_REQUIRES := $(CUTIL_PC) $(SECURITY_PC)
 PKGCONFIG_INSTALL_PATH ?= $(PC_INSTALL_PATH)
 
 install: all ## Install the library
@@ -760,6 +770,6 @@ $(ASAN_FLAGS_STAMP): force-flags
 
 $(FUZZ_FLAGS_STAMP): force-flags
 	@mkdir -p $(@D)
-	@printf '%s\n' '$(FUZZ_CC) $(FUZZ_CXX) $(FUZZ_SAN) $(FUZZ_LIB_FLAGS) $(FUZZ_BIN_FLAGS) $(INCLUDE) $(CUTIL_LIBS)' > $@.new
+	@printf '%s\n' '$(FUZZ_CC) $(FUZZ_CXX) $(FUZZ_SAN) $(FUZZ_LIB_FLAGS) $(FUZZ_BIN_FLAGS) $(INCLUDE) $(SECURITY_LIBS) $(CUTIL_LIBS)' > $@.new
 	@cmp -s $@.new $@ 2>/dev/null && rm -f $@.new || mv -f $@.new $@
 
