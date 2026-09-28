@@ -13,21 +13,21 @@ there with `generate.py`). LUT/CMYK fixtures are produced here by
 | `gray_g22.icc` | grayscale, gamma 2.2 |
 | `swap_rg.icc` | sRGB red/green exchanged, linear — phase-2 gate |
 | `cmyk_mft2.icc` | CMYK AToB1 lut16Type — phase-3 polarity gate |
-| `rgb_mft1.icc` | RGB AToB0 lut8Type — LUT parse |
+| `rgb_mft1.icc` | RGB AToB0 lut8Type — LUT parse / Argyll gate |
 | `rgb_mab.icc` | RGB AToB1 lutAtoBType (v4) — mAB parse |
+| `rgb_mab_para.icc` | RGB AToB1 mAB with parametricCurveType A curves |
 
 ## Oracles
 
 Fixtures are generated from CIE arithmetic without asking a CMM
 (`generate_lut.py` is structurally independent of littleCMS and ArgyllCMS).
 
-**littleCMS** remains available as an incidental oracle via
-`libs/image`'s pinned Pillow container (`verify_icc.py` / `oracle-exec`), and
-can be pointed at these bytes the same way. It is not wired into `libs/color`'s
-`make test` for phase 3.
+**ArgyllCMS 3.3.0** is this library's own CMM pin:
+`tools/oracle/containers/IMAGES`, built by `make oracle-build`, judged by
+`make check-argyll`. Lookups go through `icclu` (handles the CMYK/RGB v2 LUT
+fixtures); the version banner comes from `xicclu`. Independence from littleCMS
+is structural — a separate CMM. ICC v4 (`rgb_mab*.icc`) is outside this pin:
+Debian's Argyll 3.3 refuses v4.
 
-**ArgyllCMS** is not pinned in this environment. The Debian package exists on
-the archive (`argyll`) but no container image or VERSION pin was added: the
-handoff allows documenting that gap rather than blocking the phase. When a
-second reading for the perceptual tail is needed, pin Argyll beside the
-Pillow image and state whether its independence is structural or incidental.
+**littleCMS** remains an incidental second reading via `libs/image`'s pinned
+Pillow container. It is not linked into this library.

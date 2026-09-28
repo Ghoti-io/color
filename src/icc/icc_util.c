@@ -78,6 +78,9 @@ void gcol_icc_curve_clear(gcol_icc_curve_t * c, const GCOL_Allocator * alloc) {
   c->sample_count = 0;
   c->kind = GCOL_ICC_CURVE_IDENTITY;
   c->gamma = 1.0;
+  c->para_function = 0;
+  c->para_count = 0;
+  memset(c->para, 0, sizeof(c->para));
 }
 
 static double clamp01(double v) {
@@ -120,6 +123,34 @@ GCOL_Result gcol_icc_curve_decode(
     double a = (double)c->samples[i] / 65535.0;
     double b = (double)c->samples[i + 1u] / 65535.0;
     *linear = a + t * (b - a);
+    return GCOL_OK;
+  }
+  case GCOL_ICC_CURVE_PARAMETRIC: {
+    /* ICC.1:2010 §10.15. Params: g,a,b,c,d,e,f depending on function. */
+    const double * p = c->para;
+    const double X = encoded;
+    double Y = 0.0;
+    switch (c->para_function) {
+    case 0:
+      Y = pow(X, p[0]);
+      break;
+    case 1:
+      Y = (X >= -p[2] / p[1]) ? pow(p[1] * X + p[2], p[0]) : 0.0;
+      break;
+    case 2:
+      Y = (X >= -p[2] / p[1]) ? pow(p[1] * X + p[2], p[0]) + p[3] : p[3];
+      break;
+    case 3:
+      Y = (X >= p[4]) ? pow(p[1] * X + p[2], p[0]) : p[3] * X;
+      break;
+    case 4:
+      Y = (X >= p[4]) ? pow(p[1] * X + p[2], p[0]) + p[5]
+                      : p[3] * X + p[6];
+      break;
+    default:
+      return GCOL_ERR_CORRUPT;
+    }
+    *linear = clamp01(Y);
     return GCOL_OK;
   }
   }
@@ -171,6 +202,26 @@ GCOL_Result gcol_icc_curve_encode(
     double b = (double)c->samples[hi];
     double t = (b > a) ? (target - a) / (b - a) : 0.0;
     *encoded = ((double)lo + t) / (double)last;
+    return GCOL_OK;
+  }
+  case GCOL_ICC_CURVE_PARAMETRIC: {
+    /* Invert by bisection; the ICC functions are designed monotone. */
+    double lo = 0.0;
+    double hi = 1.0;
+    for (int i = 0; i < 48; i++) {
+      double mid = 0.5 * (lo + hi);
+      double y = 0.0;
+      GCOL_Result r = gcol_icc_curve_decode(c, mid, &y);
+      if (r != GCOL_OK) {
+        return r;
+      }
+      if (y < linear) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    *encoded = 0.5 * (lo + hi);
     return GCOL_OK;
   }
   }
@@ -235,6 +286,51 @@ GCOL_Result gcol_icc_curve_to_transfer(
      * let a transform built from the profile's curves use the samples. */
     info->transfer = GCOL_TRANSFER_UNKNOWN;
     return GCOL_OK;
+  case GCOL_ICC_CURVE_PARAMETRIC: {
+    /* Expand ICC functions 0..4 into the type-4 param vector Color_Info holds. */
+    info->transfer = GCOL_TRANSFER_PARAMETRIC;
+    memset(info->transfer_params, 0, sizeof(info->transfer_params));
+    const double * p = c->para;
+    switch (c->para_function) {
+    case 0: /* Y = X^g */
+      info->transfer_params[0] = p[0];
+      info->transfer_params[1] = 1.0;
+      break;
+    case 1: /* Y = (aX+b)^g for X >= -b/a, else 0 */
+      info->transfer_params[0] = p[0];
+      info->transfer_params[1] = p[1];
+      info->transfer_params[2] = p[2];
+      if (fabs(p[1]) > 1e-18) {
+        info->transfer_params[4] = -p[2] / p[1];
+      }
+      break;
+    case 2: /* Y = (aX+b)^g + c for X >= -b/a, else c */
+      info->transfer_params[0] = p[0];
+      info->transfer_params[1] = p[1];
+      info->transfer_params[2] = p[2];
+      info->transfer_params[5] = p[3]; /* e */
+      info->transfer_params[6] = p[3]; /* f = c so below-threshold is constant c */
+      if (fabs(p[1]) > 1e-18) {
+        info->transfer_params[4] = -p[2] / p[1];
+      }
+      break;
+    case 3: /* Y = (aX+b)^g for X >= d, else cX */
+      info->transfer_params[0] = p[0];
+      info->transfer_params[1] = p[1];
+      info->transfer_params[2] = p[2];
+      info->transfer_params[3] = p[3];
+      info->transfer_params[4] = p[4];
+      break;
+    case 4: /* full type 4 */
+      for (int i = 0; i < 7; i++) {
+        info->transfer_params[i] = p[i];
+      }
+      break;
+    default:
+      return GCOL_ERR_CORRUPT;
+    }
+    return GCOL_OK;
+  }
   }
   return GCOL_ERR_INTERNAL;
 }

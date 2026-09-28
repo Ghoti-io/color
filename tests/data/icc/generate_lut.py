@@ -9,21 +9,26 @@ library's own LUT code.
 Profiles
 --------
 * ``cmyk_mft2.icc`` — CMYK AToB1 lut16Type (mft2), 2-point CLUT, XYZ PCS.
-  Device (C,M,Y,K) in reflection polarity (0=no ink) maps to relative XYZ
-  fractions of D50 via a simple subtractive model. The polarity gate inverts
-  storage bytes under GCOL_CMYK_POLARITY_INK before the LUT sees them.
+  Device (C,M,Y,K) in reflection polarity (0=no ink) maps to absolute XYZ
+  under D50 via a simple subtractive model. CLUT samples use the ICC XYZ
+  PCS encoding (u1Fixed15 for 16-bit). The polarity gate inverts storage
+  bytes under GCOL_CMYK_POLARITY_INK before the LUT sees them.
 
 * ``rgb_mft1.icc`` — RGB AToB0 lut8Type (mft1), 2-point CLUT approximating
-  identity under D50, so the profile *reads* as a LUT profile.
+  sRGB→XYZ D50. CLUT samples use the 8-bit XYZ PCS encoding (code/128).
 
 * ``rgb_mab.icc`` — RGB AToB1 lutAtoBType (mAB ), B-curves only (identity),
-  so v4-style tags parse.
+  so v4-style tags parse. Outside ArgyllCMS 3.3's reach (no ICC v4).
+
+* ``rgb_mab_para.icc`` — RGB AToB1 mAB with parametricCurveType A curves
+  (function 0, gamma 2.2) and identity B curves; no CLUT. Exercises the
+  parametric path without needing a CLUT.
 
 Independence of oracles
 -----------------------
 These bytes are generated without asking littleCMS or ArgyllCMS. Optional
-verification against lcms2 (via Pillow) is a separate script; ArgyllCMS is
-not pinned in this environment (see tests/data/icc/README.md).
+verification against those CMMs is ``make check-argyll`` (Argyll) and
+image's Pillow/lcms2 container.
 """
 from __future__ import annotations
 
@@ -79,6 +84,32 @@ def identity_u8() -> bytes:
     return bytes(range(256))
 
 
+def encode_xyz_u8(X: float, Y: float, Z: float) -> bytes:
+    """8-bit XYZ PCS: code = round(component * 128), clamped to 0..255."""
+    out = bytearray()
+    for v in (X, Y, Z):
+        code = int(round(v * 128.0))
+        if code < 0:
+            code = 0
+        if code > 255:
+            code = 255
+        out.append(code)
+    return bytes(out)
+
+
+def encode_xyz_u16(X: float, Y: float, Z: float) -> bytes:
+    """16-bit XYZ PCS: u1Fixed15Number = round(component * 32768)."""
+    out = bytearray()
+    for v in (X, Y, Z):
+        code = int(round(v * 32768.0))
+        if code < 0:
+            code = 0
+        if code > 65535:
+            code = 65535
+        out += struct.pack(">H", code)
+    return bytes(out)
+
+
 def build_profile(space: bytes, tags, desc: str, version: int = 0x02100000,
                   profile_class: bytes = b"prtr") -> bytes:
     tags = list(tags)
@@ -119,23 +150,21 @@ def subtractive_rgb(c, m, y, k):
     return r, g, b
 
 
-def rgb_to_xyz_frac(r, g, b):
-    """sRGB linear → XYZ, returned as fractions of D50 (so white→1,1,1)."""
-    # Columns of Bradford-adapted sRGB→XYZ D50 from generate.py / publication.
+def rgb_to_xyz_abs(r, g, b):
+    """sRGB linear → absolute XYZ under D50 (Bradford-adapted matrix)."""
     rx, ry, rz = 0.43607, 0.22249, 0.01392
     gx, gy, gz = 0.38515, 0.71687, 0.09708
     bx, by, bz = 0.14307, 0.06061, 0.71410
     X = r * rx + g * gx + b * bx
     Y = r * ry + g * gy + b * by
     Z = r * rz + g * gz + b * bz
-    return (X / D50_XYZ[0], Y / D50_XYZ[1], Z / D50_XYZ[2])
+    return (X, Y, Z)
 
 
 def tag_mft2_cmyk():
     """lut16Type: 4 in, 3 out, grid=2, identity tables, subtractive CLUT."""
     grid = 2
     in_ch, out_ch = 4, 3
-    # identity matrix
     mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
     in_entries = 2
     out_entries = 2
@@ -148,7 +177,6 @@ def tag_mft2_cmyk():
     )
     tables_in = identity_u16(in_entries) * in_ch
     clut = bytearray()
-    # CLUT order: nested C, M, Y, K from 0..grid-1
     for ci in range(grid):
         for mi in range(grid):
             for yi in range(grid):
@@ -158,17 +186,13 @@ def tag_mft2_cmyk():
                     y = yi / (grid - 1)
                     k = ki / (grid - 1)
                     r, g, b = subtractive_rgb(c, m, y, k)
-                    xf, yf, zf = rgb_to_xyz_frac(r, g, b)
-                    for v in (xf, yf, zf):
-                        v = max(0.0, min(1.0, v))
-                        clut += struct.pack(
-                            ">H", int(round(v * 65535.0)))
+                    clut += encode_xyz_u16(*rgb_to_xyz_abs(r, g, b))
     tables_out = identity_u16(out_entries) * out_ch
     return header + tables_in + bytes(clut) + tables_out
 
 
 def tag_mft1_rgb_identity():
-    """lut8Type: 3 in, 3 out, grid=2, near-identity CLUT."""
+    """lut8Type: 3 in, 3 out, grid=2, sRGB→XYZ CLUT."""
     grid = 2
     in_ch, out_ch = 3, 3
     mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
@@ -181,9 +205,7 @@ def tag_mft1_rgb_identity():
                 r = ri / (grid - 1)
                 g = gi / (grid - 1)
                 b = bi / (grid - 1)
-                xf, yf, zf = rgb_to_xyz_frac(r, g, b)
-                for v in (xf, yf, zf):
-                    clut.append(int(round(max(0.0, min(1.0, v)) * 255.0)))
+                clut += encode_xyz_u8(*rgb_to_xyz_abs(r, g, b))
     tables_out = identity_u8() * out_ch
     return header + tables_in + bytes(clut) + tables_out
 
@@ -192,22 +214,42 @@ def tag_curv_identity() -> bytes:
     return b"curv" + b"\0" * 4 + struct.pack(">I", 0)
 
 
+def tag_para_gamma(g: float) -> bytes:
+    """parametricCurveType function 0: Y = X^g."""
+    return b"para" + b"\0" * 4 + struct.pack(">HH", 0, 0) + s15f16(g)
+
+
 def tag_mab_b_only():
     """lutAtoBType with only B curves (identity) — enough to parse."""
-    # Layout: header 32 bytes, then three curv tags for B.
     b0 = tag_curv_identity()
     b1 = tag_curv_identity()
     b2 = tag_curv_identity()
-    # offsets relative to tag start
     off_b = 32
     payload = bytearray(32)
     payload[0:4] = b"mAB "
     payload[8] = 3  # input
     payload[9] = 3  # output
     payload[12:16] = struct.pack(">I", off_b)  # B
-    # matrix, M, CLUT, A all zero
     body = b0 + b1 + b2
-    # pad curves to 4-byte alignment already (12 bytes each)
+    return bytes(payload) + body
+
+
+def tag_mab_para_a():
+    """lutAtoBType: parametric A curves (γ=2.2) + identity B; no CLUT."""
+    a = tag_para_gamma(2.2)
+    assert len(a) == 16
+    b = tag_curv_identity()
+    assert len(b) == 12
+    # Layout: header 32, then 3×A (16 each), then 3×B (12 each).
+    off_a = 32
+    off_b = off_a + 3 * 16
+    payload = bytearray(32)
+    payload[0:4] = b"mAB "
+    payload[8] = 3
+    payload[9] = 3
+    payload[12:16] = struct.pack(">I", off_b)  # B
+    payload[28:32] = struct.pack(">I", off_a)  # A
+    body = a * 3 + b * 3
     return bytes(payload) + body
 
 
@@ -255,9 +297,25 @@ def main() -> None:
     with open(os.path.join(OUT, "rgb_mab.icc"), "wb") as f:
         f.write(rgb_mab)
 
+    rgb_para = build_profile(
+        b"RGB ",
+        [
+            (b"desc", tag_desc("Ghoti test RGB mAB parametric")),
+            (b"cprt", tag_text("No copyright, use freely.")),
+            (b"wtpt", tag_xyz(D50_XYZ)),
+            (b"A2B1", tag_mab_para_a()),
+        ],
+        "Ghoti test RGB mAB parametric",
+        version=0x04400000,
+        profile_class=b"mntr",
+    )
+    with open(os.path.join(OUT, "rgb_mab_para.icc"), "wb") as f:
+        f.write(rgb_para)
+
     print("wrote cmyk_mft2.icc (%d bytes)" % len(cmyk))
     print("wrote rgb_mft1.icc (%d bytes)" % len(rgb_mft1))
     print("wrote rgb_mab.icc (%d bytes)" % len(rgb_mab))
+    print("wrote rgb_mab_para.icc (%d bytes)" % len(rgb_para))
 
 
 if __name__ == "__main__":

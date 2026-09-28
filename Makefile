@@ -336,7 +336,7 @@ $(APP_DIR)/examples/%$(EXE_EXTENSION): examples/%.c $(APP_DIR)/$(STATIC_TARGET) 
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
-.PHONY: fuzz fuzz-clean
+.PHONY: fuzz fuzz-clean oracle-build oracle-version check-argyll
 
 watch: ## Watch sources and rebuild
 	@while true; do \
@@ -747,6 +747,34 @@ coverage: ## Build instrumented, run the tests, and report line coverage
 
 clean: ## Remove the build directories
 	-@rm -rf ./build
+
+####################################################################
+# ArgyllCMS oracle (this library's own CMM pin; not littleCMS).
+####################################################################
+
+ORACLE := tools/oracle
+ORACLE_RUN := python3 $(ORACLE)/oracle_run.py
+ORACLE_IMAGE := localhost/ghoti-color-oracle-argyll:3.3.0
+GCOL_ICC_LOOKUP := $(APP_DIR)/oracle/gcol_icc_lookup$(EXE_EXTENSION)
+
+$(GCOL_ICC_LOOKUP): $(ORACLE)/gcol_icc_lookup.c $(APP_DIR)/$(STATIC_TARGET) \
+		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET)
+	@printf '\n### Compiling Oracle Probe: gcol_icc_lookup ###\n'
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(INCLUDE) -Isrc -Isrc/icc -o $@ $< $(LDFLAGS) \
+		$(COLORLIBRARY) $(CUTIL_LIBS) -lm
+
+oracle-build: ## Build the pinned ArgyllCMS 3.3.0 image
+	docker build -t $(ORACLE_IMAGE) \
+		-f $(ORACLE)/containers/argyll/Containerfile \
+		$(ORACLE)/containers/argyll
+
+oracle-version: ## Print which Argyll pin would answer
+	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) argyll -- true
+
+check-argyll: $(GCOL_ICC_LOOKUP) ## Fail if our device→XYZ disagrees with icclu
+	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) argyll -- \
+		python3 $(ORACLE)/verify_argyll.py $(GCOL_ICC_LOOKUP)
 
 help: ## Display this help
 	@grep -E '^[ a-zA-Z_-]+:.*?## .*$$' Makefile | sort | sed 's/\([^:]*\):.*## \(.*\)/\1:\2/' | awk -F: '{printf "%-22s %s\n", $$1, $$2}'

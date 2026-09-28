@@ -128,8 +128,32 @@ static GCOL_Result read_curv_bytes(const GCOL_Allocator * alloc,
     return GCOL_OK;
   }
   if (sig == GCOL_ICC_SIG_PARA) {
-    /* parametricCurveType: treat as unsupported for LUT pipelines for now. */
-    return GCOL_ERR_UNSUPPORTED;
+    /* parametricCurveType: function uInt16, reserved, then s15Fixed16 params. */
+    if (avail < 12u) {
+      return GCOL_ERR_CORRUPT;
+    }
+    uint16_t fn = gcol_icc_read_u16(p + 8);
+    static const uint8_t k_params[5] = {1, 3, 4, 5, 7};
+    if (fn > 4u) {
+      return GCOL_ERR_CORRUPT;
+    }
+    uint8_t np = k_params[fn];
+    size_t need = 12u + (size_t)np * 4u;
+    if (avail < need) {
+      return GCOL_ERR_CORRUPT;
+    }
+    gcol_icc_curve_clear(out, alloc);
+    out->kind = GCOL_ICC_CURVE_PARAMETRIC;
+    out->para_function = fn;
+    out->para_count = np;
+    for (uint8_t i = 0; i < np; i++) {
+      out->para[i] = gcol_icc_read_s15f16(p + 12 + (size_t)i * 4u);
+    }
+    *consumed = (need + 3u) & ~3u;
+    if (*consumed > avail) {
+      *consumed = need;
+    }
+    return GCOL_OK;
   }
   return GCOL_ERR_CORRUPT;
 }
@@ -267,6 +291,7 @@ static GCOL_Result parse_mft(const GCOL_Allocator * alloc,
     return GCOL_ERR_OOM;
   }
   out->clut_count = nclut;
+  out->clut_precision = is16 ? 2u : 1u;
   for (size_t i = 0; i < nclut; i++) {
     if (is16) {
       out->clut[i] = (double)gcol_icc_read_u16(tag + pos + i * 2u) / 65535.0;
@@ -433,6 +458,7 @@ static GCOL_Result parse_mab(const GCOL_Allocator * alloc,
       return GCOL_ERR_OOM;
     }
     out->clut_count = nclut;
+    out->clut_precision = precision;
     for (size_t i = 0; i < nclut; i++) {
       if (precision == 1u) {
         out->clut[i] = (double)tag[data_off + i] / 255.0;
@@ -593,15 +619,23 @@ GCOL_Result gcol_icc_lut_apply(const gcol_icc_lut_t * lut,
 
   if (lut->pcs_lab && lut->output_chan == 3u) {
     lab_encoded_to_xyz(mid, xyz);
+  } else if (lut->grid >= 2u && lut->clut_precision != 0u) {
+    /* ICC XYZ PCS in a CLUT: 8-bit is code/128, 16-bit is u1Fixed15
+     * (code/32768). Storage was normalised to [0,1], so undo that scale. */
+    const double scale = (lut->clut_precision == 1u) ? (255.0 / 128.0)
+                                                     : (65535.0 / 32768.0);
+    xyz[0] = mid[0] * scale;
+    xyz[1] = mid[1] * scale;
+    xyz[2] = mid[2] * scale;
   } else {
-    /* XYZ PCS in mft1/mft2 is often 0..1 relative to 1+ε; scale by D50. */
-    xyz[0] = mid[0] * 0.9642;
-    xyz[1] = mid[1] * 1.0000;
-    xyz[2] = mid[2] * 0.8249;
-    if (lut->output_chan >= 1u && lut->output_chan < 3u) {
-      for (uint8_t i = lut->output_chan; i < 3u; i++) {
-        xyz[i] = 0.0;
-      }
+    /* B-curve-only (no CLUT): curves already emit PCS values. */
+    xyz[0] = mid[0];
+    xyz[1] = mid[1];
+    xyz[2] = mid[2];
+  }
+  if (lut->output_chan >= 1u && lut->output_chan < 3u) {
+    for (uint8_t i = lut->output_chan; i < 3u; i++) {
+      xyz[i] = 0.0;
     }
   }
   return GCOL_OK;

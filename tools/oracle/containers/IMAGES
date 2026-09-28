@@ -1,0 +1,22 @@
+# The oracle references, pinned.
+#
+# One line per reference, tab-separated: <name> <image> <version> <what it
+# answers>. Machine-read by tools/oracle/oracle_env.py.
+#
+# Built here: no upstream digest of the finished image. What is pinned is
+# everything the Containerfile reads, and the run-time version check is the
+# guarantee. Raising a pin is deliberate - a newer Argyll is newer answers.
+#
+# Building it:
+#   make oracle-build
+# which is:
+#   docker build -t localhost/ghoti-color-oracle-argyll:3.3.0 \
+#     -f tools/oracle/containers/argyll/Containerfile \
+#     tools/oracle/containers/argyll
+
+# ArgyllCMS 3.3.0 (Debian). Lookups go through icclu (icclib V3.1.0 bundled
+# in the package): it accepts the CMYK and RGB v2 LUT fixtures this library
+# generates. xicclu 3.3.0 is also present and is what names the package
+# version in the probe. Neither tool in this package supports ICC v4, so the
+# mAB fixture is outside this oracle's reach - stated, not hidden.
+argyll	localhost/ghoti-color-oracle-argyll:3.3.0	Lookup ICC or CAL colors, Version 3.3.0	ICC matrix/TRC and v2 LUT (mft1/mft2) device→PCS lookups via icclu; second CMM reading beside littleCMS

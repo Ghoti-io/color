@@ -68,16 +68,21 @@ typedef struct gcol_icc_lut_s gcol_icc_lut_t;
 #define GCOL_ICC_SIG_B2A1 GCOL_ICC_SIG('B', '2', 'A', '1')
 #define GCOL_ICC_SIG_B2A2 GCOL_ICC_SIG('B', '2', 'A', '2')
 
-/** Tone curve recovered from a curv tag. */
+/** Tone curve recovered from a curv or para tag. */
 typedef struct {
   enum {
     GCOL_ICC_CURVE_IDENTITY = 0, ///< Zero entries.
     GCOL_ICC_CURVE_GAMMA,        ///< One u8Fixed8 entry.
-    GCOL_ICC_CURVE_SAMPLED       ///< N uint16 samples, device→linear.
+    GCOL_ICC_CURVE_SAMPLED,      ///< N uint16 samples, device→linear.
+    GCOL_ICC_CURVE_PARAMETRIC    ///< ICC parametricCurveType (function 0..4).
   } kind;
   double gamma;       ///< When GAMMA.
   uint16_t * samples; ///< When SAMPLED; length sample_count.
   size_t sample_count;
+  /** parametricCurveType: function 0..4 and up to seven s15Fixed16 params. */
+  uint16_t para_function;
+  uint8_t para_count;
+  double para[7];
 } gcol_icc_curve_t;
 
 struct GCOL_ICC_Profile {

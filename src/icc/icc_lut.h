@@ -28,10 +28,12 @@
 /** Multi-dimensional LUT recovered from mft1 / mft2 / mAB / mBA. */
 struct gcol_icc_lut_s {
   uint8_t input_chan;  ///< 1..4.
-  uint8_t output_chan; ///< 1..3 (PCS XYZ/Lab).
+  uint8_t output_chan; ///< 1..4 (PCS XYZ/Lab, or device for B2A).
   uint8_t grid;        ///< CLUT points per axis; 0 when no CLUT.
+  uint8_t clut_precision; ///< 1 or 2: bytes per CLUT sample (mft/mAB).
   bool has_matrix;     ///< Apply e[] after M curves (mft) or mid matrix (mAB).
   bool pcs_lab;        ///< Output is ICC Lab encoding rather than XYZ.
+  bool pcs_to_device;  ///< True for B2A (PCS in → device out).
   double e[9];         ///< Row-major 3x3; identity when unused.
   gcol_icc_curve_t * in_curves;  ///< length input_chan; may be NULL.
   gcol_icc_curve_t * m_curves;   ///< length output_chan; may be NULL (mAB).

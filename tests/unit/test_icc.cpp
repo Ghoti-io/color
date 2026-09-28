@@ -273,7 +273,7 @@ TEST(IccWriteParse, RoundTripSrgbGamma) {
 }
 
 TEST(IccLut, RgbMft1AndMabParse) {
-  for (const char * name : {"rgb_mft1.icc", "rgb_mab.icc"}) {
+  for (const char * name : {"rgb_mft1.icc", "rgb_mab.icc", "rgb_mab_para.icc"}) {
     GCOL_ICC_Profile * p = parse_named(name);
     ASSERT_NE(p, nullptr) << name;
     EXPECT_FALSE(gcol_icc_is_matrix_trc(p)) << name;

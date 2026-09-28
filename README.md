@@ -28,6 +28,7 @@ library for the description types. The plan is in the workspace at
 | 2 | ICC parse and write, matrix/TRC profiles, transforms | **done** |
 | 3 | LUT-based profiles, CMYK, ICC v4 tags | **done** |
 | 4 | HDR: PQ, HLG, absolute luminance; LogLuv helpers | **done** |
+| oracle | ArgyllCMS 3.3.0 pin (`make check-argyll`) | **done** |
 
 A header appears under `include/ghoti.io/color/` in the commit that implements
 it, so the directory listing is what exists rather than what is intended.
@@ -38,15 +39,16 @@ what this library transforms under.
 
 ## Why not littleCMS
 
-littleCMS is the reference implementation and this library does not wrap it,
-for a reason that is easy to miss: **lcms2 is already the suite's oracle.**
-`libs/image`'s ICC corpus is checked against littleCMS 2.16 in a pinned
-container, so a `libs/color` that *was* lcms2 would make that check compare
-lcms2 against lcms2 and agree by construction. A shared dependency makes two
-readings one measurement.
+littleCMS is a reference implementation and this library does not wrap it,
+for a reason that is easy to miss: **a shared dependency makes two readings
+one measurement.** If `libs/color` *was* lcms2, every gate that consulted
+lcms2 would agree by construction.
 
-lcms2 stays where it is: an oracle, pinned, and never linked. See
-[documentation/design.md](documentation/design.md).
+This library's own CMM pin is **ArgyllCMS 3.3.0** (`make oracle-build`,
+`make check-argyll`). littleCMS remains available as an incidental second
+reading via `libs/image`'s Pillow container, and is never linked here. See
+[documentation/design.md](documentation/design.md) and
+`tests/data/icc/README.md`.
 
 ## Example
 
