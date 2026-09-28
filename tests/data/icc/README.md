@@ -22,12 +22,16 @@ there with `generate.py`). LUT/CMYK fixtures are produced here by
 Fixtures are generated from CIE arithmetic without asking a CMM
 (`generate_lut.py` is structurally independent of littleCMS and ArgyllCMS).
 
-**ArgyllCMS 3.3.0** is this library's own CMM pin:
-`tools/oracle/containers/IMAGES`, built by `make oracle-build`, judged by
-`make check-argyll`. Lookups go through `icclu` (handles the CMYK/RGB v2 LUT
-fixtures); the version banner comes from `xicclu`. Independence from littleCMS
-is structural — a separate CMM. ICC v4 (`rgb_mab*.icc`) is outside this pin:
-Debian's Argyll 3.3 refuses v4.
+Two CMM pins live under `tools/oracle/containers/`. Neither is linked into
+the library; `make oracle-build` builds both images.
 
-**littleCMS** remains an incidental second reading via `libs/image`'s pinned
-Pillow container. It is not linked into this library.
+**ArgyllCMS 3.3.0** — `make check-argyll`. Lookups go through `icclu`
+(handles the CMYK/RGB v2 LUT fixtures); the version banner comes from
+`xicclu`. Independence from littleCMS is structural — a separate CMM. ICC
+v4 (`rgb_mab*.icc`) is outside this pin: Debian's Argyll 3.3 refuses v4.
+
+**littleCMS 2.16** — `make check-lcms`. Lookups go through
+`lcms_icc_lookup` (built into the image against liblcms2). This is the pin
+that can judge ICC v4 mAB / parametricCurveType. Matrix and CMYK cases are
+checked here as well. `rgb_mft1` is Argyll-only: the two CMMs disagree on
+that 8-bit LUT by a few parts in 1e3, and this library matches Argyll.

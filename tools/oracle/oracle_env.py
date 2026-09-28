@@ -19,7 +19,8 @@ text.
 `command("argyll")` returns the argv prefix that runs inside the image built
 by `containers/argyll/Containerfile`. Lookups use `icclu` (bundled icclib);
 the version pin is taken from `xicclu`'s banner, which names the ArgyllCMS
-release.
+release. `command("lcms2")` is the littleCMS 2 image
+(`containers/lcms2/Containerfile`); lookups use `lcms_icc_lookup`.
 
 Modes, from GHOTI_ORACLE_MODE:
 
@@ -37,6 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 IMAGES = os.path.join(HERE, "containers", "IMAGES")
 ARGYLL = os.path.join(HERE, "containers", "argyll")
+LCMS2 = os.path.join(HERE, "containers", "lcms2")
 
 MODE = os.environ.get("GHOTI_ORACLE_MODE", "container")
 ENGINE = os.environ.get("GHOTI_CONTAINER_ENGINE", "docker")
@@ -50,12 +52,14 @@ class OracleUnavailable(Exception):
 # The probe is a program in the image, not a shell one-liner here.
 PROBE = {
     "argyll": (["argyll-version"], "Lookup ICC or CAL colors, Version 3.3.0"),
+    "lcms2": (["lcms2-version"], "LittleCMS 2.16"),
 }
 
 # Host mode checks this binary's presence; the probe script is how its
 # version is read.
 BINARY = {
     "argyll": "xicclu",
+    "lcms2": "lcms_icc_lookup",
 }
 
 _pins = None
@@ -144,16 +148,21 @@ ALIAS = dict(
     if "=" in pair)
 
 
-def _argv(argv):
+def _argv(name, argv):
     """Where a probe script is found.
 
     In the image it is on PATH. On the host it is the same file in this tree.
     """
     if MODE != "host":
         return list(argv)
+    host_dirs = {
+        "argyll": ARGYLL,
+        "lcms2": LCMS2,
+    }
+    base = host_dirs.get(name, HERE)
     rewritten = []
     for word in argv:
-        local = os.path.join(ARGYLL, word)
+        local = os.path.join(base, word)
         rewritten.append(local if os.path.isfile(local) else word)
     return rewritten
 
@@ -168,7 +177,7 @@ def command(name, argv=None, scratch=None):
     name = ALIAS.get(name, name)
     ensure(name)
     inner = argv if argv is not None else [PROBE.get(name, ([name],))[0][0]]
-    inner = _argv(inner)
+    inner = _argv(name, inner)
     if MODE == "host":
         return list(inner)
     image = pins()[name][0]

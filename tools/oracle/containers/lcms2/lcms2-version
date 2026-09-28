@@ -1,0 +1,8 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-3.0-only
+# Print the pin string tools/oracle/containers/IMAGES expects.
+# pkg-config is not kept in the finished image; the lookup tool links
+# liblcms2 and we read the SONAME package version via dpkg.
+set -eu
+printf 'LittleCMS %s\n' "$(dpkg-query -W -f='${Version}' liblcms2-2 | sed 's/[-+].*//')"
+lcms_icc_lookup 2>&1 | head -n 1 || true

@@ -620,19 +620,16 @@ GCOL_Result gcol_icc_lut_apply(const gcol_icc_lut_t * lut,
 
   if (lut->pcs_lab && lut->output_chan == 3u) {
     lab_encoded_to_xyz(mid, xyz);
-  } else if (lut->grid >= 2u && lut->clut_precision != 0u) {
-    /* ICC XYZ PCS in a CLUT: 8-bit is code/128, 16-bit is u1Fixed15
-     * (code/32768). Storage was normalised to [0,1], so undo that scale. */
+  } else {
+    /* ICC XYZ PCS: 8-bit is code/128, 16-bit is u1Fixed15 (code/32768).
+     * Curve and CLUT samples are stored normalised to [0,1]; undo that.
+     * B-curve-only mAB (no CLUT) still speaks the 16-bit encoding — matching
+     * littleCMS 2.16 on the synthetic rgb_mab*.icc fixtures. */
     const double scale = (lut->clut_precision == 1u) ? (255.0 / 128.0)
                                                      : (65535.0 / 32768.0);
     xyz[0] = mid[0] * scale;
     xyz[1] = mid[1] * scale;
     xyz[2] = mid[2] * scale;
-  } else {
-    /* B-curve-only (no CLUT): curves already emit PCS values. */
-    xyz[0] = mid[0];
-    xyz[1] = mid[1];
-    xyz[2] = mid[2];
   }
   if (lut->output_chan >= 1u && lut->output_chan < 3u) {
     for (uint8_t i = lut->output_chan; i < 3u; i++) {
@@ -656,17 +653,11 @@ GCOL_Result gcol_icc_lut_apply_b2a(const gcol_icc_lut_t * lut,
   if (lut->pcs_lab) {
     return GCOL_ERR_UNSUPPORTED; /* Lab PCS B2A deferred. */
   }
+  /* Same encoding as A2B: 8-bit /128, else u1Fixed15. No-CLUT B2A is 16-bit. */
   const double scale = (lut->clut_precision == 1u) ? (255.0 / 128.0)
                                                    : (65535.0 / 32768.0);
-  /* When B2A has no CLUT, curves already speak PCS values. */
-  if (lut->grid >= 2u && lut->clut_precision != 0u) {
-    for (int i = 0; i < 3; i++) {
-      stage[i] = clamp01(xyz[i] / scale);
-    }
-  } else {
-    for (int i = 0; i < 3; i++) {
-      stage[i] = clamp01(xyz[i]);
-    }
+  for (int i = 0; i < 3; i++) {
+    stage[i] = clamp01(xyz[i] / scale);
   }
   for (uint8_t i = 3; i < lut->input_chan; i++) {
     stage[i] = 0.0;

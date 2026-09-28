@@ -5,18 +5,23 @@
 #
 # Built here: no upstream digest of the finished image. What is pinned is
 # everything the Containerfile reads, and the run-time version check is the
-# guarantee. Raising a pin is deliberate - a newer Argyll is newer answers.
+# guarantee. Raising a pin is deliberate - a newer Argyll or littleCMS is
+# newer answers.
 #
-# Building it:
+# Building them:
 #   make oracle-build
-# which is:
-#   docker build -t localhost/ghoti-color-oracle-argyll:3.3.0 \
-#     -f tools/oracle/containers/argyll/Containerfile \
-#     tools/oracle/containers/argyll
+# which builds both images named below.
 
 # ArgyllCMS 3.3.0 (Debian). Lookups go through icclu (icclib V3.1.0 bundled
 # in the package): it accepts the CMYK and RGB v2 LUT fixtures this library
 # generates. xicclu 3.3.0 is also present and is what names the package
 # version in the probe. Neither tool in this package supports ICC v4, so the
-# mAB fixture is outside this oracle's reach - stated, not hidden.
-argyll	localhost/ghoti-color-oracle-argyll:3.3.0	Lookup ICC or CAL colors, Version 3.3.0	ICC matrix/TRC and v2 LUT (mft1/mft2) device→PCS lookups via icclu; second CMM reading beside littleCMS
+# mAB fixture is outside this oracle's reach - stated, not hidden. That is
+# why littleCMS is pinned beside it.
+argyll	localhost/ghoti-color-oracle-argyll:3.3.0	Lookup ICC or CAL colors, Version 3.3.0	ICC matrix/TRC and v2 LUT (mft1/mft2) device→PCS lookups via icclu; independent CMM reading beside littleCMS
+
+# littleCMS 2.16 (Debian). Lookups go through lcms_icc_lookup (built into the
+# image against liblcms2). This is the CMM that can judge ICC v4 mAB /
+# parametricCurveType fixtures Argyll refuses. Not linked into the library —
+# independence from lcms2 stays structural; the gate compares two programs.
+lcms2	localhost/ghoti-color-oracle-lcms2:2.16	LittleCMS 2.16	ICC matrix/TRC, v2 LUT, and v4 mAB device→PCS lookups via liblcms2

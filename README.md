@@ -28,7 +28,7 @@ library for the description types. The plan is in the workspace at
 | 2 | ICC parse and write, matrix/TRC profiles, transforms | **done** |
 | 3 | LUT-based profiles, CMYK, ICC v4 tags | **done** |
 | 4 | HDR: PQ, HLG, absolute luminance; LogLuv helpers | **done** |
-| oracle | ArgyllCMS 3.3.0 pin (`make check-argyll`) | **done** |
+| oracle | ArgyllCMS 3.3.0 + littleCMS 2.16 (`check-argyll`, `check-lcms`) | **done** |
 
 A header appears under `include/ghoti.io/color/` in the commit that implements
 it, so the directory listing is what exists rather than what is intended.
@@ -46,9 +46,14 @@ for a reason that is easy to miss: **a shared dependency makes two readings
 one measurement.** If `libs/color` *was* lcms2, every gate that consulted
 lcms2 would agree by construction.
 
-This library's own CMM pin is **ArgyllCMS 3.3.0** (`make oracle-build`,
-`make check-argyll`). littleCMS remains available as an incidental second
-reading via `libs/image`'s Pillow container, and is never linked here. See
+The CMM pins are therefore separate programs, not link dependencies:
+
+| pin | command | judges |
+|---|---|---|
+| **ArgyllCMS 3.3.0** | `make check-argyll` | matrix/TRC and v2 LUT (independent of lcms2) |
+| **littleCMS 2.16** | `make check-lcms` | the same, plus ICC v4 mAB / parametricCurveType |
+
+`make oracle-build` builds both images. See
 [documentation/design.md](documentation/design.md) and
 `tests/data/icc/README.md`.
 

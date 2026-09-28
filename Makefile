@@ -336,7 +336,7 @@ $(APP_DIR)/examples/%$(EXE_EXTENSION): examples/%.c $(APP_DIR)/$(STATIC_TARGET) 
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
-.PHONY: fuzz fuzz-clean oracle-build oracle-version check-argyll
+.PHONY: fuzz fuzz-clean oracle-build oracle-version check-argyll check-lcms
 
 watch: ## Watch sources and rebuild
 	@while true; do \
@@ -749,12 +749,14 @@ clean: ## Remove the build directories
 	-@rm -rf ./build
 
 ####################################################################
-# ArgyllCMS oracle (this library's own CMM pin; not littleCMS).
+# CMM oracles: ArgyllCMS (v2, independent) and littleCMS 2 (v2+v4).
+# Neither is linked into the library — the gates compare two programs.
 ####################################################################
 
 ORACLE := tools/oracle
 ORACLE_RUN := python3 $(ORACLE)/oracle_run.py
-ORACLE_IMAGE := localhost/ghoti-color-oracle-argyll:3.3.0
+ORACLE_IMAGE_ARGYLL := localhost/ghoti-color-oracle-argyll:3.3.0
+ORACLE_IMAGE_LCMS2 := localhost/ghoti-color-oracle-lcms2:2.16
 GCOL_ICC_LOOKUP := $(APP_DIR)/oracle/gcol_icc_lookup$(EXE_EXTENSION)
 
 $(GCOL_ICC_LOOKUP): $(ORACLE)/gcol_icc_lookup.c $(APP_DIR)/$(STATIC_TARGET) \
@@ -764,17 +766,25 @@ $(GCOL_ICC_LOOKUP): $(ORACLE)/gcol_icc_lookup.c $(APP_DIR)/$(STATIC_TARGET) \
 	$(CC) $(CFLAGS) $(INCLUDE) -Isrc -Isrc/icc -o $@ $< $(LDFLAGS) \
 		$(COLORLIBRARY) $(CUTIL_LIBS) -lm
 
-oracle-build: ## Build the pinned ArgyllCMS 3.3.0 image
-	docker build -t $(ORACLE_IMAGE) \
+oracle-build: ## Build the pinned ArgyllCMS 3.3.0 and littleCMS 2.16 images
+	docker build -t $(ORACLE_IMAGE_ARGYLL) \
 		-f $(ORACLE)/containers/argyll/Containerfile \
 		$(ORACLE)/containers/argyll
+	docker build -t $(ORACLE_IMAGE_LCMS2) \
+		-f $(ORACLE)/containers/lcms2/Containerfile \
+		$(ORACLE)/containers/lcms2
 
-oracle-version: ## Print which Argyll pin would answer
+oracle-version: ## Print which Argyll and littleCMS pins would answer
 	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) argyll -- true
+	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) lcms2 -- true
 
 check-argyll: $(GCOL_ICC_LOOKUP) ## Fail if our device→XYZ disagrees with icclu
 	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) argyll -- \
 		python3 $(ORACLE)/verify_argyll.py $(GCOL_ICC_LOOKUP)
+
+check-lcms: $(GCOL_ICC_LOOKUP) ## Fail if our device→XYZ disagrees with littleCMS
+	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) lcms2 -- \
+		python3 $(ORACLE)/verify_lcms.py $(GCOL_ICC_LOOKUP)
 
 help: ## Display this help
 	@grep -E '^[ a-zA-Z_-]+:.*?## .*$$' Makefile | sort | sed 's/\([^:]*\):.*## \(.*\)/\1:\2/' | awk -F: '{printf "%-22s %s\n", $$1, $$2}'

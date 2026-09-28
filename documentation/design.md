@@ -40,11 +40,13 @@ littleCMS (lcms2, MIT) is the reference CMM. Pillow, GIMP, Firefox, Krita,
 Ghostscript and Android all use it. It is not being wrapped, for three
 reasons in descending order of weight.
 
-**It is already the oracle.** `libs/image` carries six ICC profiles and checks
-them against littleCMS 2.16 in a pinned container. A `libs/color` that *was*
-lcms2 would make that check compare lcms2 against lcms2, and it would then
-agree by construction - the gate would stop being able to fail. A shared
-dependency makes two readings into one measurement.
+**It is already the oracle.** This library pins littleCMS 2.16 in
+`tools/oracle/containers/lcms2/` (`make check-lcms`) and ArgyllCMS 3.3.0
+beside it (`make check-argyll`). A `libs/color` that *was* lcms2 would make
+the littleCMS gate compare lcms2 against lcms2, and it would then agree by
+construction — the gate would stop being able to fail. A shared dependency
+makes two readings into one measurement. Argyll is the independent second
+CMM for matrix and v2 LUT; littleCMS is what can judge ICC v4.
 
 **It would be the suite's first third-party dependency.** `libs/image` links
 `-lstdc++ -lm` and nothing else; every other dependency resolves through

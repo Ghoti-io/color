@@ -20,7 +20,8 @@ Profiles
   sRGB→XYZ D50. CLUT samples use the 8-bit XYZ PCS encoding (code/128).
 
 * ``rgb_mab.icc`` — RGB AToB1 lutAtoBType (mAB ), B-curves only (identity),
-  so v4-style tags parse. Outside ArgyllCMS 3.3's reach (no ICC v4).
+  so v4-style tags parse. Judged by ``make check-lcms`` (ArgyllCMS 3.3 has
+  no ICC v4).
 
 * ``rgb_mab_para.icc`` — RGB AToB1 mAB with parametricCurveType A curves
   (function 0, gamma 2.2) and identity B curves; no CLUT. Exercises the
@@ -29,8 +30,8 @@ Profiles
 Independence of oracles
 -----------------------
 These bytes are generated without asking littleCMS or ArgyllCMS. Optional
-verification against those CMMs is ``make check-argyll`` (Argyll) and
-image's Pillow/lcms2 container.
+verification against those CMMs is ``make check-argyll`` (Argyll, v2) and
+``make check-lcms`` (littleCMS, v2+v4).
 """
 from __future__ import annotations
 
