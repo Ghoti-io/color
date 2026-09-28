@@ -345,17 +345,58 @@ TEST(IccCmyk, TransformsWithPolarity) {
   gcol_icc_free(cmyk);
 }
 
-TEST(IccCmyk, PerceptualIntentRefused) {
+TEST(IccCmyk, PerceptualWithoutTableRefused) {
+  /* Matrix/TRC profile: no A2B0 to honour. */
+  GCOL_Color_Info src, dst;
+  gcol_color_info_default(&src);
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&src, GCOL_PRIMARIES_SRGB));
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_ADOBE_RGB));
+  src.transfer = GCOL_TRANSFER_SRGB;
+  dst.transfer = GCOL_TRANSFER_SRGB;
+  GCOL_Transform * x = nullptr;
+  EXPECT_EQ(gcol_transform_create(nullptr, &src, &dst, GCOL_INTENT_PERCEPTUAL,
+                  0, &x),
+      GCOL_ERR_UNSUPPORTED);
+}
+
+TEST(IccCmyk, PerceptualUsesA2B0Table) {
   GCOL_ICC_Profile * cmyk = parse_named("cmyk_mft2.icc");
   ASSERT_NE(cmyk, nullptr);
   GCOL_Color_Info dst;
   gcol_color_info_default(&dst);
   ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
-  dst.transfer = GCOL_TRANSFER_SRGB;
-  GCOL_Transform * x = nullptr;
-  EXPECT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
-                  GCOL_INTENT_PERCEPTUAL, 0, GCOL_CMYK_POLARITY_REFLECTION, &x),
-      GCOL_ERR_UNSUPPORTED);
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+
+  GCOL_Transform * rel = nullptr;
+  GCOL_Transform * per = nullptr;
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_REFLECTION, &rel),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_PERCEPTUAL, 0, GCOL_CMYK_POLARITY_REFLECTION,
+                  &per),
+      GCOL_OK);
+
+  /* Paper white under both intents; A2B0 is half the XYZ of A2B1, so the
+   * perceptual result is darker. */
+  float in[4] = {0.f, 0.f, 0.f, 0.f};
+  float out_rel[3] = {0, 0, 0};
+  float out_per[3] = {0, 0, 0};
+  GCOL_Sample_Layout src_layout = {GCOL_SAMPLE_FLOAT32, 4, GCOL_PIXEL_CMYK};
+  GCOL_Sample_Layout dst_layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(
+      gcol_transform_apply(rel, &src_layout, in, &dst_layout, out_rel, 1),
+      GCOL_OK);
+  ASSERT_EQ(
+      gcol_transform_apply(per, &src_layout, in, &dst_layout, out_per, 1),
+      GCOL_OK);
+  EXPECT_NEAR(out_rel[1], 1.0, 0.05);
+  EXPECT_LT(out_per[1], out_rel[1] - 0.2f);
+
+  gcol_transform_free(rel);
+  gcol_transform_free(per);
   gcol_icc_free(cmyk);
 }
 

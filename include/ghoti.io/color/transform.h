@@ -31,9 +31,11 @@
  * integer sample to float does not need a rounding rule. Values outside the
  * unit interval are clipped before encoding unless absolute HDR keeps them.
  *
- * Perceptual intent is vendor-defined and is not implemented here: requesting
- * it returns ::GCOL_ERR_UNSUPPORTED. Colorimetric intents are specification-
- * defined and are what this library transforms under.
+ * Perceptual intent has no specification of its own. When an ICC profile
+ * carries an A2B0/B2A0 table, requesting perceptual applies that table —
+ * those bytes are the profile author's mapping. When no such table exists,
+ * perceptual returns ::GCOL_ERR_UNSUPPORTED rather than inventing a gamut
+ * map. Colorimetric intents are specification-defined.
  */
 
 #ifndef GHOTI_IO_GCOL_TRANSFORM_H
@@ -118,7 +120,8 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
  * passes device values through (0 = no ink). Unknown polarity is refused for
  * CMYK sources.
  *
- * Relative colorimetric only. Perceptual is unsupported (no specification).
+ * Relative colorimetric prefers A2B1 (falling back to A2B0 when that is the
+ * only AToB). Perceptual uses A2B0 only; without that table it is refused.
  */
 GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
     const GCOL_ICC_Profile * src, const GCOL_Color_Info * dst,
@@ -128,8 +131,8 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
 /**
  * @brief Build a transform from @p src into a parsed ICC profile (BToA).
  *
- * Destination CMYK/LUT path. Relative colorimetric only. @p cmyk_polarity
- * selects how CMYK bytes are written when the profile is CMYK.
+ * Destination CMYK/LUT path. Intent selection matches
+ * ::gcol_transform_create_icc (B2A1 for relative, B2A0 for perceptual).
  */
 GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
     const GCOL_Color_Info * src, const GCOL_ICC_Profile * dst,

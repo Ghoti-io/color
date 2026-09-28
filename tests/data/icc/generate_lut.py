@@ -8,11 +8,13 @@ library's own LUT code.
 
 Profiles
 --------
-* ``cmyk_mft2.icc`` — CMYK AToB1 lut16Type (mft2), 2-point CLUT, XYZ PCS.
-  Device (C,M,Y,K) in reflection polarity (0=no ink) maps to absolute XYZ
-  under D50 via a simple subtractive model. CLUT samples use the ICC XYZ
-  PCS encoding (u1Fixed15 for 16-bit). The polarity gate inverts storage
-  bytes under GCOL_CMYK_POLARITY_INK before the LUT sees them.
+* ``cmyk_mft2.icc`` — CMYK AToB1 lut16Type (mft2), 2-point CLUT, XYZ PCS,
+  plus a distinct AToB0 (XYZ×0.5) so perceptual and relative disagree, and
+  BToA1 for destination CMYK. Device (C,M,Y,K) in reflection polarity
+  (0=no ink) maps under A2B1 to absolute XYZ under D50 via a simple
+  subtractive model. CLUT samples use the ICC XYZ PCS encoding (u1Fixed15
+  for 16-bit). The polarity gate inverts storage bytes under
+  GCOL_CMYK_POLARITY_INK before the LUT sees them.
 
 * ``rgb_mft1.icc`` — RGB AToB0 lut8Type (mft1), 2-point CLUT approximating
   sRGB→XYZ D50. CLUT samples use the 8-bit XYZ PCS encoding (code/128).
@@ -277,6 +279,37 @@ def tag_mft2_cmyk():
     return header + tables_in + bytes(clut) + tables_out
 
 
+def tag_mft2_cmyk_perceptual():
+    """A2B0: same structure as A2B1 but XYZ scaled by 0.5 so intents disagree."""
+    grid = 2
+    in_ch, out_ch = 4, 3
+    mat = b"".join(s15f16(1.0 if i % 4 == 0 else 0.0) for i in range(9))
+    in_entries = 2
+    out_entries = 2
+    header = (
+        b"mft2"
+        + b"\0" * 4
+        + bytes([in_ch, out_ch, grid, 0])
+        + mat
+        + struct.pack(">HH", in_entries, out_entries)
+    )
+    tables_in = identity_u16(in_entries) * in_ch
+    clut = bytearray()
+    for ci in range(grid):
+        for mi in range(grid):
+            for yi in range(grid):
+                for ki in range(grid):
+                    c = ci / (grid - 1)
+                    m = mi / (grid - 1)
+                    y = yi / (grid - 1)
+                    k = ki / (grid - 1)
+                    r, g, b = subtractive_rgb(c, m, y, k)
+                    X, Y, Z = rgb_to_xyz_abs(r, g, b)
+                    clut += encode_xyz_u16(0.5 * X, 0.5 * Y, 0.5 * Z)
+    tables_out = identity_u16(out_entries) * out_ch
+    return header + tables_in + bytes(clut) + tables_out
+
+
 def tag_mft1_rgb_identity():
     """lut8Type: 3 in, 3 out, grid=2, sRGB→XYZ CLUT."""
     grid = 2
@@ -347,6 +380,7 @@ def main() -> None:
             (b"cprt", tag_text("No copyright, use freely.")),
             (b"wtpt", tag_xyz(D50_XYZ)),
             (b"A2B1", tag_mft2_cmyk()),
+            (b"A2B0", tag_mft2_cmyk_perceptual()),
             (b"B2A1", tag_mft2_cmyk_b2a()),
         ],
         "Ghoti test CMYK mft2",

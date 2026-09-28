@@ -33,9 +33,11 @@ library for the description types. The plan is in the workspace at
 A header appears under `include/ghoti.io/color/` in the commit that implements
 it, so the directory listing is what exists rather than what is intended.
 
-Perceptual rendering intent is **not** implemented: it has no specification,
-and requesting it returns `GCOL_ERR_UNSUPPORTED`. Colorimetric intents are
-what this library transforms under.
+Perceptual rendering intent has no specification of its own. When a profile
+carries an `A2B0`/`B2A0` table, requesting perceptual applies that table.
+Without such a table, perceptual returns `GCOL_ERR_UNSUPPORTED` — this
+library does not invent a gamut map. Colorimetric intents are what the
+specification defines.
 
 ## Why not littleCMS
 

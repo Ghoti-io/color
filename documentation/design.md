@@ -63,12 +63,13 @@ Two things, stated rather than glossed.
 
 The v4 tail above is genuine work and will take phases.
 
-**Perceptual intent has no specification.** It is vendor-defined, so "correct"
-for a perceptual transform means "agrees with a named reference", and that
-reference is lcms2 whether or not it is linked. Writing our own means choosing
-it explicitly instead of inheriting it. Colorimetric intents do not have this
-problem: they are defined, and a disagreement there is a bug in one of the two
-implementations.
+**Perceptual intent has no specification of its own.** A profile may still
+carry A2B0/B2A0 tables; applying those bytes under perceptual intent is
+honouring the profile, not inventing a mapping. Without those tables,
+perceptual returns `GCOL_ERR_UNSUPPORTED`. Inventing a silent default gamut
+map and calling it perceptual would be the wrong kind of helpful. Colorimetric
+intents do not have this problem: they are defined, and a disagreement there
+is a bug in one of the two implementations.
 
 ## Why it is not part of `libs/image`
 

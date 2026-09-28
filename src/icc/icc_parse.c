@@ -164,6 +164,63 @@ static GCOL_Result compute_profile_id(const GCOL_Allocator * alloc,
   return GCOL_OK;
 }
 
+/**
+ * Parse one AToB/BToA tag into @p out_slot.
+ * Missing tag leaves *out_slot NULL and returns GCOL_OK.
+ * @p pcs_to_device selects B2A channel rules (PCS in, device out).
+ */
+static GCOL_Result load_a2b_tag(const GCOL_Allocator * alloc,
+    const GCOL_Limits * lim, const unsigned char * p, size_t size,
+    uint32_t tag_count, uint32_t data_space, bool pcs_lab, uint32_t sig,
+    bool pcs_to_device, gcol_icc_lut_t ** out_slot) {
+  *out_slot = NULL;
+  uint32_t off = 0, tsz = 0;
+  if (find_tag(p, size, tag_count, sig, &off, &tsz) != GCOL_OK) {
+    return GCOL_OK;
+  }
+  gcol_icc_lut_t * lut =
+      (gcol_icc_lut_t *)gcol_alloc(alloc, 1, sizeof(gcol_icc_lut_t));
+  if (!lut) {
+    return GCOL_ERR_OOM;
+  }
+  lut->e[0] = lut->e[4] = lut->e[8] = 1.0;
+  GCOL_Result lr = gcol_icc_lut_parse(alloc, lim, p + off, tsz, pcs_lab, lut);
+  if (lr != GCOL_OK) {
+    gcol_icc_lut_clear(lut, alloc);
+    alloc->free_fn(alloc->ctx, lut);
+    return lr;
+  }
+  uint8_t expect = 0;
+  if (data_space == GCOL_ICC_SIG_RGB) {
+    expect = 3;
+  } else if (data_space == GCOL_ICC_SIG_CMYK) {
+    expect = 4;
+  } else if (data_space == GCOL_ICC_SIG_GRAY) {
+    expect = 1;
+  }
+  if (pcs_to_device) {
+    if (lut->input_chan < 3u || (expect != 0 && lut->output_chan != expect)) {
+      gcol_icc_lut_clear(lut, alloc);
+      alloc->free_fn(alloc->ctx, lut);
+      return GCOL_ERR_CORRUPT;
+    }
+    lut->pcs_to_device = true;
+  } else {
+    if (expect != 0 && lut->input_chan != expect) {
+      gcol_icc_lut_clear(lut, alloc);
+      alloc->free_fn(alloc->ctx, lut);
+      return GCOL_ERR_CORRUPT;
+    }
+    if (lut->output_chan < 3u) {
+      gcol_icc_lut_clear(lut, alloc);
+      alloc->free_fn(alloc->ctx, lut);
+      return GCOL_ERR_CORRUPT;
+    }
+  }
+  *out_slot = lut;
+  return GCOL_OK;
+}
+
 static void xyz_to_xy(const double xyz[3], GCOL_Chromaticity * c) {
   double sum = xyz[0] + xyz[1] + xyz[2];
   if (!(sum > 0.0)) {
@@ -298,100 +355,38 @@ GCOL_API GCOL_Result gcol_icc_parse(const GCOL_Allocator * alloc,
     return GCOL_ERR_UNSUPPORTED;
   }
 
-  /* Prefer relative-colorimetric AToB1, then perceptual AToB0, then AToB2. */
-  static const uint32_t a2b_sigs[3] = {
-      GCOL_ICC_SIG_A2B1, GCOL_ICC_SIG_A2B0, GCOL_ICC_SIG_A2B2};
-  for (int i = 0; i < 3; i++) {
-    if (find_tag(p, size, tag_count, a2b_sigs[i], &off, &tsz) != GCOL_OK) {
-      continue;
-    }
-    gcol_icc_lut_t * lut =
-        (gcol_icc_lut_t *)gcol_alloc(alloc, 1, sizeof(gcol_icc_lut_t));
-    if (!lut) {
-      gcol_icc_free(prof);
-      return GCOL_ERR_OOM;
-    }
-    lut->e[0] = lut->e[4] = lut->e[8] = 1.0;
-    GCOL_Result lr =
-        gcol_icc_lut_parse(alloc, &lim, p + off, tsz, pcs_lab, lut);
+  /* Load A2B1 and A2B0 independently so intent can select without inventing. */
+  {
+    GCOL_Result lr = load_a2b_tag(alloc, &lim, p, size, tag_count,
+        prof->data_space, pcs_lab, GCOL_ICC_SIG_A2B1, false, &prof->a2b);
     if (lr != GCOL_OK) {
-      gcol_icc_lut_clear(lut, alloc);
-      alloc->free_fn(alloc->ctx, lut);
       gcol_icc_free(prof);
       return lr;
     }
-    /* Channel count must match the data colour space. */
-    uint8_t expect = 0;
-    if (prof->data_space == GCOL_ICC_SIG_RGB) {
-      expect = 3;
-    } else if (prof->data_space == GCOL_ICC_SIG_CMYK) {
-      expect = 4;
-    } else if (prof->data_space == GCOL_ICC_SIG_GRAY) {
-      expect = 1;
-    }
-    if (expect != 0 && lut->input_chan != expect) {
-      gcol_icc_lut_clear(lut, alloc);
-      alloc->free_fn(alloc->ctx, lut);
-      gcol_icc_free(prof);
-      return GCOL_ERR_CORRUPT;
-    }
-    if (lut->output_chan < 3u) {
-      gcol_icc_lut_clear(lut, alloc);
-      alloc->free_fn(alloc->ctx, lut);
-      gcol_icc_free(prof);
-      return GCOL_ERR_CORRUPT;
-    }
-    prof->a2b = lut;
-    prof->has_lut = true;
-    prof->matrix_trc = false;
-    break;
-  }
-
-  /* Prefer relative-colorimetric BToA1, then BToA0, then BToA2. */
-  static const uint32_t b2a_sigs[3] = {
-      GCOL_ICC_SIG_B2A1, GCOL_ICC_SIG_B2A0, GCOL_ICC_SIG_B2A2};
-  for (int i = 0; i < 3; i++) {
-    if (find_tag(p, size, tag_count, b2a_sigs[i], &off, &tsz) != GCOL_OK) {
-      continue;
-    }
-    gcol_icc_lut_t * lut =
-        (gcol_icc_lut_t *)gcol_alloc(alloc, 1, sizeof(gcol_icc_lut_t));
-    if (!lut) {
-      gcol_icc_free(prof);
-      return GCOL_ERR_OOM;
-    }
-    lut->e[0] = lut->e[4] = lut->e[8] = 1.0;
-    GCOL_Result lr =
-        gcol_icc_lut_parse(alloc, &lim, p + off, tsz, pcs_lab, lut);
+    lr = load_a2b_tag(alloc, &lim, p, size, tag_count, prof->data_space,
+        pcs_lab, GCOL_ICC_SIG_A2B0, false, &prof->a2b0);
     if (lr != GCOL_OK) {
-      gcol_icc_lut_clear(lut, alloc);
-      alloc->free_fn(alloc->ctx, lut);
       gcol_icc_free(prof);
       return lr;
     }
-    uint8_t expect = 0;
-    if (prof->data_space == GCOL_ICC_SIG_RGB) {
-      expect = 3;
-    } else if (prof->data_space == GCOL_ICC_SIG_CMYK) {
-      expect = 4;
-    } else if (prof->data_space == GCOL_ICC_SIG_GRAY) {
-      expect = 1;
-    }
-    /* B2A: PCS in (3), device out. */
-    if (lut->input_chan < 3u || (expect != 0 && lut->output_chan != expect)) {
-      gcol_icc_lut_clear(lut, alloc);
-      alloc->free_fn(alloc->ctx, lut);
+  }
+  {
+    GCOL_Result lr = load_a2b_tag(alloc, &lim, p, size, tag_count,
+        prof->data_space, pcs_lab, GCOL_ICC_SIG_B2A1, true, &prof->b2a);
+    if (lr != GCOL_OK) {
       gcol_icc_free(prof);
-      return GCOL_ERR_CORRUPT;
+      return lr;
     }
-    lut->pcs_to_device = true;
-    prof->b2a = lut;
+    lr = load_a2b_tag(alloc, &lim, p, size, tag_count, prof->data_space,
+        pcs_lab, GCOL_ICC_SIG_B2A0, true, &prof->b2a0);
+    if (lr != GCOL_OK) {
+      gcol_icc_free(prof);
+      return lr;
+    }
+  }
+  if (prof->a2b || prof->a2b0 || prof->b2a || prof->b2a0) {
     prof->has_lut = true;
     prof->matrix_trc = false;
-    break;
-  }
-
-  if (prof->a2b || prof->b2a) {
     *out = prof;
     return GCOL_OK;
   }
@@ -528,10 +523,20 @@ GCOL_API void gcol_icc_free(GCOL_ICC_Profile * profile) {
     a->free_fn(a->ctx, profile->a2b);
     profile->a2b = NULL;
   }
+  if (profile->a2b0) {
+    gcol_icc_lut_clear(profile->a2b0, a);
+    a->free_fn(a->ctx, profile->a2b0);
+    profile->a2b0 = NULL;
+  }
   if (profile->b2a) {
     gcol_icc_lut_clear(profile->b2a, a);
     a->free_fn(a->ctx, profile->b2a);
     profile->b2a = NULL;
+  }
+  if (profile->b2a0) {
+    gcol_icc_lut_clear(profile->b2a0, a);
+    a->free_fn(a->ctx, profile->b2a0);
+    profile->b2a0 = NULL;
   }
   if (profile->description) {
     a->free_fn(a->ctx, profile->description);
@@ -540,19 +545,49 @@ GCOL_API void gcol_icc_free(GCOL_ICC_Profile * profile) {
 }
 
 bool gcol_icc_has_lut(const GCOL_ICC_Profile * profile) {
-  return profile && profile->has_lut && profile->a2b;
+  return profile && (profile->a2b != NULL || profile->a2b0 != NULL);
+}
+
+const gcol_icc_lut_t * gcol_icc_a2b_for_intent(
+    const GCOL_ICC_Profile * profile, GCOL_Rendering_Intent intent) {
+  if (!profile) {
+    return NULL;
+  }
+  if (intent == GCOL_INTENT_PERCEPTUAL) {
+    /* Honour the profile's perceptual table only — never invent a mapping. */
+    return profile->a2b0;
+  }
+  if (intent == GCOL_INTENT_RELATIVE_COLORIMETRIC) {
+    /* Prefer A2B1; fall back to A2B0 when it is the only AToB (ICC §). */
+    return profile->a2b ? profile->a2b : profile->a2b0;
+  }
+  return NULL;
 }
 
 const gcol_icc_lut_t * gcol_icc_a2b(const GCOL_ICC_Profile * profile) {
-  return gcol_icc_has_lut(profile) ? profile->a2b : NULL;
+  return gcol_icc_a2b_for_intent(profile, GCOL_INTENT_RELATIVE_COLORIMETRIC);
 }
 
 bool gcol_icc_has_b2a(const GCOL_ICC_Profile * profile) {
-  return profile && profile->b2a != NULL;
+  return profile && (profile->b2a != NULL || profile->b2a0 != NULL);
+}
+
+const gcol_icc_lut_t * gcol_icc_b2a_for_intent(
+    const GCOL_ICC_Profile * profile, GCOL_Rendering_Intent intent) {
+  if (!profile) {
+    return NULL;
+  }
+  if (intent == GCOL_INTENT_PERCEPTUAL) {
+    return profile->b2a0;
+  }
+  if (intent == GCOL_INTENT_RELATIVE_COLORIMETRIC) {
+    return profile->b2a ? profile->b2a : profile->b2a0;
+  }
+  return NULL;
 }
 
 const gcol_icc_lut_t * gcol_icc_b2a(const GCOL_ICC_Profile * profile) {
-  return gcol_icc_has_b2a(profile) ? profile->b2a : NULL;
+  return gcol_icc_b2a_for_intent(profile, GCOL_INTENT_RELATIVE_COLORIMETRIC);
 }
 
 GCOL_API uint32_t gcol_icc_version(const GCOL_ICC_Profile * profile) {

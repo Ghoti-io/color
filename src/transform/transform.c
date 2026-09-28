@@ -337,15 +337,13 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
   if (!src || !dst) {
     return GCOL_ERR_INVALID;
   }
-  if (!gcol_icc_has_lut(src)) {
+  const gcol_icc_lut_t * lut = gcol_icc_a2b_for_intent(src, intent);
+  if (!lut) {
     return GCOL_ERR_UNSUPPORTED;
   }
   if (!dst->primaries_stated || !dst->white_stated ||
       dst->transfer == GCOL_TRANSFER_UNKNOWN) {
     return GCOL_ERR_INVALID;
-  }
-  if (intent != GCOL_INTENT_RELATIVE_COLORIMETRIC) {
-    return GCOL_ERR_UNSUPPORTED;
   }
   if (src->data_space == GCOL_ICC_SIG_CMYK) {
     if (cmyk_polarity != GCOL_CMYK_POLARITY_INK &&
@@ -380,8 +378,8 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
   copy_info(&x->dst, dst);
   x->kind = GCOL_XFORM_ICC_LUT;
   x->flags = flags;
-  x->lut = src->a2b;
-  x->src_channels = src->a2b->input_chan;
+  x->lut = lut;
+  x->src_channels = lut->input_chan;
   x->dst_channels = 3;
   x->cmyk_polarity = cmyk_polarity;
   memcpy(x->matrix, pcs_to_dst, sizeof(x->matrix));
@@ -400,15 +398,13 @@ GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
   if (!src || !dst) {
     return GCOL_ERR_INVALID;
   }
-  if (!gcol_icc_has_b2a(dst)) {
+  const gcol_icc_lut_t * lut = gcol_icc_b2a_for_intent(dst, intent);
+  if (!lut) {
     return GCOL_ERR_UNSUPPORTED;
   }
   if (!src->primaries_stated || !src->white_stated ||
       src->transfer == GCOL_TRANSFER_UNKNOWN) {
     return GCOL_ERR_INVALID;
-  }
-  if (intent != GCOL_INTENT_RELATIVE_COLORIMETRIC) {
-    return GCOL_ERR_UNSUPPORTED;
   }
   if (dst->data_space == GCOL_ICC_SIG_CMYK) {
     if (cmyk_polarity != GCOL_CMYK_POLARITY_INK &&
@@ -439,9 +435,9 @@ GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
   gcol_color_info_default(&x->dst);
   x->kind = GCOL_XFORM_ICC_B2A;
   x->flags = flags;
-  x->lut = dst->b2a;
+  x->lut = lut;
   x->src_channels = 3;
-  x->dst_channels = dst->b2a->output_chan;
+  x->dst_channels = lut->output_chan;
   x->cmyk_polarity = cmyk_polarity;
   memcpy(x->matrix, src_to_pcs, sizeof(x->matrix));
   *out = x;

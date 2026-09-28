@@ -97,7 +97,7 @@ struct GCOL_ICC_Profile {
   bool matrix_trc;
   bool has_rgb_matrix;
   bool has_gray_trc;
-  bool has_lut; ///< AToB LUT present (mft1/mft2/mAB).
+  bool has_lut; ///< Any AToB or BToA LUT present.
   /** Row-major RGB→XYZ under D50 (columns are rXYZ, gXYZ, bXYZ). */
   double rgb_to_xyz_d50[9];
   double wtpt[3];
@@ -105,23 +105,42 @@ struct GCOL_ICC_Profile {
   gcol_icc_curve_t trc_g;
   gcol_icc_curve_t trc_b;
   gcol_icc_curve_t trc_k;
-  /** Owned when has_lut; relative-colorimetric AToB preferred. */
+  /** Relative-colorimetric AToB1 (device→PCS), when present. */
   gcol_icc_lut_t * a2b;
-  /** Owned when present; relative-colorimetric BToA preferred (PCS→device). */
+  /** Perceptual AToB0 (device→PCS), when present. */
+  gcol_icc_lut_t * a2b0;
+  /** Relative-colorimetric BToA1 (PCS→device), when present. */
   gcol_icc_lut_t * b2a;
+  /** Perceptual BToA0 (PCS→device), when present. */
+  gcol_icc_lut_t * b2a0;
   unsigned char profile_id[16];
 };
 
-/** True when @p profile carries a device→PCS LUT. */
+/** True when @p profile carries any device→PCS LUT. */
 bool gcol_icc_has_lut(const GCOL_ICC_Profile * profile);
 
-/** Device→PCS LUT, or NULL. */
+/**
+ * Device→PCS LUT for @p intent.
+ * Perceptual returns A2B0 only (no invented fallback). Relative prefers
+ * A2B1 and may fall back to A2B0 when that is the only table (ICC-permitted).
+ */
+const gcol_icc_lut_t * gcol_icc_a2b_for_intent(
+    const GCOL_ICC_Profile * profile, GCOL_Rendering_Intent intent);
+
+/** Relative-preferred device→PCS LUT (A2B1, else A2B0), or NULL. */
 const gcol_icc_lut_t * gcol_icc_a2b(const GCOL_ICC_Profile * profile);
 
-/** True when @p profile carries a PCS→device LUT. */
+/** True when @p profile carries any PCS→device LUT. */
 bool gcol_icc_has_b2a(const GCOL_ICC_Profile * profile);
 
-/** PCS→device LUT, or NULL. */
+/**
+ * PCS→device LUT for @p intent. Same selection rule as
+ * ::gcol_icc_a2b_for_intent.
+ */
+const gcol_icc_lut_t * gcol_icc_b2a_for_intent(
+    const GCOL_ICC_Profile * profile, GCOL_Rendering_Intent intent);
+
+/** Relative-preferred PCS→device LUT (B2A1, else B2A0), or NULL. */
 const gcol_icc_lut_t * gcol_icc_b2a(const GCOL_ICC_Profile * profile);
 
 uint32_t gcol_icc_read_u32(const unsigned char * p);

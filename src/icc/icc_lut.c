@@ -23,8 +23,9 @@
  *
  * ICC LUT tag parse and apply (mft1, mft2, mAB , mBA ).
  *
- * Colorimetric intents only: the CLUT is applied as stored. Perceptual intent
- * has no specification; agreeing with a named CMM is deferred (see design.md).
+ * Colorimetric intents apply the CLUT as stored. Perceptual intent applies
+ * A2B0/B2A0 when present; inventing a gamut map when those tags are absent
+ * is refused at transform create (see design.md).
  */
 
 #include "icc_lut.h"
