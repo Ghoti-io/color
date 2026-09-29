@@ -1,0 +1,9 @@
+# The corpus grows as the fuzzer runs; only the hand-built seeds are tracked.
+#
+# Same rule as image/security/archive and the rest: one directory per harness,
+# seeds tracked as `*.seed`, everything else ignored. A soak that writes
+# hundreds of hash-named units must not become a commit.
+*
+!.gitignore
+!*/
+!*.seed

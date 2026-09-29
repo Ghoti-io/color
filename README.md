@@ -85,11 +85,16 @@ error naming the fix.
 make                      # the shared and static libraries
 make test                 # build and run the tests, and the gates
 make test-asan            # the same under ASan and UBSan
+make fuzz                 # fuzz_icc_parse for FUZZ_TIME seconds (default 60)
+make check-argyll         # device→XYZ vs pinned ArgyllCMS 3.3.0
+make check-lcms           # device→XYZ vs pinned littleCMS 2.16
 make check-symbols        # every exported symbol carries the version token
 make install PREFIX=...   # needs sudo for a system prefix
 make help                 # every target
 ```
 
+Fuzz corpora live under `tests/fuzz/corpus/<harness>/`. Only hand-built
+`*.seed` files are tracked; units the fuzzer discovers stay local.
 ## Dependencies
 
 `cutil`, for the allocator interface, and `security`, for the MD5 an ICC
