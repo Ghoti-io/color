@@ -66,6 +66,7 @@
 #define gcol_color_info_set_gamut GHOTIIO_COLOR(gcol_color_info_set_gamut)
 #define gcol_transfer_conventions GHOTIIO_COLOR(gcol_transfer_conventions)
 #define gcol_color_info_default GHOTIIO_COLOR(gcol_color_info_default)
+#define gcol_cicp_to_color_info GHOTIIO_COLOR(gcol_cicp_to_color_info)
 #define gcol_icc_write GHOTIIO_COLOR(gcol_icc_write)
 #define gcol_icc_bytes_free GHOTIIO_COLOR(gcol_icc_bytes_free)
 

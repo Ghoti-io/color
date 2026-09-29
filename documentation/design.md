@@ -1,9 +1,9 @@
 # Design
 
-**Status:** design. Phases 0–4 (description, maths, matrix/TRC and LUT ICC
-parse, CMYK polarity, relative- and absolute-colorimetric transforms, optional
-BPC and BT.2390 PQ EETF, PQ/HLG absolute scale, LogLuv helpers) are
-implemented.
+**Status:** design. Phases 0–4 (description, H.273 CICP mapping, maths,
+matrix/TRC and LUT ICC parse, CMYK polarity, relative- and
+absolute-colorimetric transforms, optional BPC and BT.2390 PQ EETF, PQ/HLG
+absolute scale, LogLuv helpers) are implemented.
 
 This page says what this library is for, what it refuses to be, and why it
 does not wrap the reference implementation. The phase plan lives outside this
