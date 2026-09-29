@@ -38,8 +38,11 @@ own. When a profile carries `A2B0`/`B2A0` (perceptual) or `A2B2`/`B2A2`
 (saturation), requesting that intent applies the table. Without the matching
 table, the intent returns `GCOL_ERR_UNSUPPORTED` — this library does not
 invent a gamut map. Absolute colorimetric on the LUT path uses the
-colorimetric tables and scales PCS XYZ by media white / D50. Colorimetric
-intents are what the specification defines.
+colorimetric tables and scales PCS XYZ by media white / D50; on the matrix
+path it skips Bradford adaptation so illuminant differences remain.
+`GCOL_TRANSFORM_BPC` and `GCOL_TRANSFORM_TONE_MAP` are opt-in (black-point
+compensation and BT.2390 PQ EETF). Colorimetric intents are what the
+specification defines.
 
 ## Why not littleCMS
 

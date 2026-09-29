@@ -96,12 +96,28 @@ typedef struct GCOL_Transform GCOL_Transform;
 #define GCOL_TRANSFORM_CLIP 1u
 
 /**
+ * Black-point compensation. Opt-in: there is no defensible default.
+ * Matrix path uses @c black_luminance / @c white_luminance; LUT path uses
+ * ICC `bkpt` when present (else no-op).
+ */
+#define GCOL_TRANSFORM_BPC 2u
+
+/**
+ * BT.2390 PQ EETF when mapping absolute PQ into a lower peak (or relative
+ * destination). Opt-in; without it absolute PQ still uses a hard luminance
+ * scale through @c white_luminance.
+ */
+#define GCOL_TRANSFORM_TONE_MAP 4u
+
+/**
  * @brief Build a transform from @p src into @p dst.
  *
- * Supports matrix/TRC RGB descriptions under relative colorimetric intent
- * (PCS XYZ D50). Absolute PQ sources are mapped into a relative destination
- * by scaling through white_luminance (simple display-referred tone map).
- * Other intents return ::GCOL_ERR_UNSUPPORTED.
+ * Supports matrix/TRC RGB descriptions under relative and absolute
+ * colorimetric intents (PCS XYZ). Relative adapts through D50 (Bradford);
+ * absolute skips chromatic adaptation so illuminant differences remain.
+ * Absolute PQ sources are mapped into a relative destination by scaling
+ * through white_luminance unless ::GCOL_TRANSFORM_TONE_MAP is set, which
+ * applies the BT.2390 PQ EETF. Other intents return ::GCOL_ERR_UNSUPPORTED.
  *
  * @param alloc Allocator, or NULL for the default.
  * @param src Source description. Must state primaries, white, and transfer.

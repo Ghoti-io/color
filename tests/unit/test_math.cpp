@@ -294,6 +294,136 @@ TEST(LogLuv, HasSomewhereToGo) {
   EXPECT_GT(rgb[1], 0.0);
 }
 
+TEST(ToneMap, PqEetfMapsPeakToTarget) {
+  /* Mastering peak → target peak; mid-tones stay below target. */
+  EXPECT_NEAR(gcol_tone_map_pq_eetf(1000.0, 1000.0, 100.0, 0.0), 100.0, 1.0);
+  EXPECT_LT(gcol_tone_map_pq_eetf(100.0, 1000.0, 100.0, 0.0), 100.0);
+  EXPECT_GT(gcol_tone_map_pq_eetf(100.0, 1000.0, 100.0, 0.0), 0.0);
+  /* Fits already: identity in nits. */
+  EXPECT_NEAR(gcol_tone_map_pq_eetf(50.0, 100.0, 400.0, 0.0), 50.0, 1e-6);
+}
+
+TEST(HdrTransform, ToneMapFlagRollsHighlight) {
+  GCOL_Color_Info src, dst;
+  gcol_color_info_default(&src);
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&src, GCOL_PRIMARIES_BT2020));
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
+  src.transfer = GCOL_TRANSFER_PQ;
+  (void)gcol_transfer_conventions(
+      GCOL_TRANSFER_PQ, &src.reference, &src.sample_scale, &src.white_luminance);
+  src.white_luminance = 1000.0;
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+  dst.sample_scale = GCOL_SAMPLE_SCALE_RELATIVE;
+  dst.white_luminance = 100.0;
+
+  GCOL_Transform * hard = nullptr;
+  GCOL_Transform * eetf = nullptr;
+  ASSERT_EQ(gcol_transform_create(nullptr, &src, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0, &hard),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create(nullptr, &src, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC,
+                  GCOL_TRANSFORM_CLIP | GCOL_TRANSFORM_TONE_MAP, &eetf),
+      GCOL_OK);
+
+  /* 800 nits: hard scale → 0.8; EETF → near display peak (1.0). */
+  const double enc = gcol_transfer_encode(&src, 800.0 / 10000.0);
+  float in[3] = {(float)enc, (float)enc, (float)enc};
+  float out_hard[3] = {0, 0, 0};
+  float out_eetf[3] = {0, 0, 0};
+  GCOL_Sample_Layout layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(gcol_transform_apply(hard, &layout, in, &layout, out_hard, 1),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_apply(eetf, &layout, in, &layout, out_eetf, 1),
+      GCOL_OK);
+  EXPECT_NEAR(out_hard[1], 0.8, 0.08);
+  EXPECT_GT(out_eetf[1], out_hard[1] + 0.05f);
+  EXPECT_NEAR(out_eetf[1], 1.0, 0.15);
+
+  gcol_transform_free(hard);
+  gcol_transform_free(eetf);
+}
+
+TEST(TransformMatrix, AbsoluteSkipsBradford) {
+  /* sRGB (D65) → ProPhoto (D50): relative adapts; absolute keeps illuminant. */
+  GCOL_Color_Info src, dst;
+  gcol_color_info_default(&src);
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&src, GCOL_PRIMARIES_SRGB));
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_PROPHOTO));
+  src.transfer = GCOL_TRANSFER_LINEAR;
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+
+  GCOL_Transform * rel = nullptr;
+  GCOL_Transform * abs = nullptr;
+  ASSERT_EQ(gcol_transform_create(nullptr, &src, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0, &rel),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create(nullptr, &src, &dst,
+                  GCOL_INTENT_ABSOLUTE_COLORIMETRIC, 0, &abs),
+      GCOL_OK);
+
+  float white[3] = {1.f, 1.f, 1.f};
+  float out_rel[3] = {0, 0, 0};
+  float out_abs[3] = {0, 0, 0};
+  GCOL_Sample_Layout layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(gcol_transform_apply(rel, &layout, white, &layout, out_rel, 1),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_apply(abs, &layout, white, &layout, out_abs, 1),
+      GCOL_OK);
+  /* Relative maps adapted white → white. Absolute leaves a D65 cast. */
+  EXPECT_NEAR(out_rel[0], 1.0, 0.02);
+  EXPECT_NEAR(out_rel[1], 1.0, 0.02);
+  EXPECT_NEAR(out_rel[2], 1.0, 0.02);
+  EXPECT_GT(std::fabs(out_abs[0] - out_rel[0]) +
+          std::fabs(out_abs[1] - out_rel[1]) +
+          std::fabs(out_abs[2] - out_rel[2]),
+      0.02);
+
+  gcol_transform_free(rel);
+  gcol_transform_free(abs);
+}
+
+TEST(TransformMatrix, BpcMapsSourceBlack) {
+  GCOL_Color_Info src, dst;
+  gcol_color_info_default(&src);
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&src, GCOL_PRIMARIES_SRGB));
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
+  src.transfer = GCOL_TRANSFER_LINEAR;
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+  src.white_luminance = 100.0;
+  src.black_luminance = 10.0; /* 10% of white */
+  dst.white_luminance = 100.0;
+  dst.black_luminance = 0.0;
+
+  GCOL_Transform * plain = nullptr;
+  GCOL_Transform * bpc = nullptr;
+  ASSERT_EQ(gcol_transform_create(nullptr, &src, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0, &plain),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create(nullptr, &src, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC,
+                  GCOL_TRANSFORM_CLIP | GCOL_TRANSFORM_BPC, &bpc),
+      GCOL_OK);
+
+  float gray[3] = {0.1f, 0.1f, 0.1f};
+  float out_plain[3] = {0, 0, 0};
+  float out_bpc[3] = {0, 0, 0};
+  GCOL_Sample_Layout layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(gcol_transform_apply(plain, &layout, gray, &layout, out_plain, 1),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_apply(bpc, &layout, gray, &layout, out_bpc, 1),
+      GCOL_OK);
+  EXPECT_NEAR(out_plain[1], 0.1, 0.01);
+  EXPECT_NEAR(out_bpc[1], 0.0, 0.02);
+  EXPECT_LT(out_bpc[1], out_plain[1] - 0.05f);
+
+  gcol_transform_free(plain);
+  gcol_transform_free(bpc);
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

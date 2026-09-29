@@ -486,13 +486,16 @@ def main() -> None:
         f.write(cmyk)
 
     # Same CLUT as cmyk_mft2 but media white ≠ D50 so absolute ≠ relative.
+    # bkpt present so GCOL_TRANSFORM_BPC has an ICC media black to act on.
     warm_wtpt = (0.8500, 0.9000, 0.7000)
+    warm_bkpt = (0.0300, 0.0300, 0.0250)
     cmyk_abs = build_profile(
         b"CMYK",
         [
             (b"desc", tag_desc("Ghoti test CMYK absolute")),
             (b"cprt", tag_text("No copyright, use freely.")),
             (b"wtpt", tag_xyz(warm_wtpt)),
+            (b"bkpt", tag_xyz(warm_bkpt)),
             (b"A2B1", tag_mft2_cmyk()),
             (b"B2A1", tag_mft2_cmyk_b2a()),
         ],

@@ -111,6 +111,22 @@ GCOL_API double gcol_linear_to_nits(
 GCOL_API double gcol_nits_to_linear(const GCOL_Color_Info * info, double nits);
 
 /**
+ * @brief BT.2390 PQ EETF: map @p nits_in from a mastering peak to a target.
+ *
+ * Soft-knees highlights so content mastered at @p source_peak fits a display
+ * (or remit) of @p target_peak. @p target_black is the target black level in
+ * cd/m^2 (0 for true black). Returns cd/m^2. Non-PQ call sites should not
+ * use this; it is the curve behind ::GCOL_TRANSFORM_TONE_MAP.
+ *
+ * @param nits_in Source luminance in cd/m^2 (may exceed @p source_peak).
+ * @param source_peak Mastering / content peak in cd/m^2; must be > 0.
+ * @param target_peak Target peak in cd/m^2; must be > 0.
+ * @param target_black Target black in cd/m^2; 0 when unstated.
+ */
+GCOL_API double gcol_tone_map_pq_eetf(double nits_in, double source_peak,
+    double target_peak, double target_black);
+
+/**
  * @brief Decode a 32-bit SGI LogLuv pixel (TIFF SGILOG) to CIE XYZ.
  *
  * LogLuv is scene-referred and absolute: Y is in cd/m^2 (approximately).

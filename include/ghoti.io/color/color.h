@@ -230,6 +230,13 @@ typedef struct {
    * "unstated": a file does not describe a display of no luminance.
    */
   double white_luminance;
+  /**
+   * Luminance in cd/m^2 of encoded black, or 0 when unstated / true black.
+   *
+   * Used by ::GCOL_TRANSFORM_BPC on the matrix path (as a fraction of
+   * @a white_luminance when both are set). ICC `bkpt` feeds the LUT path.
+   */
+  double black_luminance;
   GCOL_Rendering_Intent intent;
   const void * icc_bytes; ///< Opaque; library does not take ownership.
   size_t icc_size;        ///< ICC profile size in bytes.
@@ -251,7 +258,7 @@ typedef struct {
   const char * icc_linked_path;
   GCOL_CMYK_Polarity cmyk_polarity; ///< Interpretation of CMYK channels; use
                                     ///< when raster format is GIMG_PIXEL_CMYK8.
-  uint8_t _reserved[12];
+  uint8_t _reserved[4];
 } GCOL_Color_Info;
 
 /**

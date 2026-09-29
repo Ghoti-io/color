@@ -410,6 +410,18 @@ GCOL_API GCOL_Result gcol_icc_parse(const GCOL_Allocator * alloc,
     prof->wtpt[2] = w[2];
     prof->has_wtpt = true;
   }
+  if (find_tag(p, size, tag_count, GCOL_ICC_SIG_BKPT, &off, &tsz) == GCOL_OK) {
+    double b[3];
+    GCOL_Result br = read_xyz_tag(p, size, off, tsz, b);
+    if (br != GCOL_OK) {
+      gcol_icc_free(prof);
+      return br;
+    }
+    prof->bkpt[0] = b[0];
+    prof->bkpt[1] = b[1];
+    prof->bkpt[2] = b[2];
+    prof->has_bkpt = true;
+  }
 
   if (prof->a2b || prof->a2b0 || prof->a2b2 || prof->b2a || prof->b2a0 ||
       prof->b2a2) {

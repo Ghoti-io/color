@@ -21,7 +21,8 @@
 /**
  * @file
  *
- * Relative-colorimetric transforms: RGB↔RGB via XYZ D50, and ICC LUT/CMYK.
+ * Relative and absolute colorimetric transforms: RGB↔RGB via XYZ, ICC LUT/CMYK,
+ * optional BPC and BT.2390 PQ EETF.
  */
 
 #include <ghoti.io/color/macros.h>
@@ -47,19 +48,37 @@ struct GCOL_Transform {
   GCOL_Color_Info src;
   GCOL_Color_Info dst;
   int kind;
-  /** Combined linear-RGB src → linear-RGB dst under relative colorimetric. */
-  double matrix[9];
+  /**
+   * Matrix path: src linear RGB → PCS XYZ (D50 for relative; native for
+   * absolute). LUT A2B path: PCS XYZ → dst linear RGB. LUT B2A path: src
+   * linear RGB → PCS XYZ.
+   */
+  double src_to_pcs[9];
+  double pcs_to_dst[9];
   /**
    * Absolute colorimetric scale applied to PCS XYZ after A2B / before B2A.
    * Relative intents leave this as (1,1,1). Absolute uses media_white / D50.
    */
   double abs_scale[3];
+  /** BPC endpoints in PCS XYZ; identity when BPC is off or unavailable. */
+  double bpc_src_black[3];
+  double bpc_src_white[3];
+  double bpc_dst_black[3];
+  double bpc_dst_white[3];
+  int bpc_enabled;
+  /** PQ EETF: source/target peaks in nits; enabled when TONE_MAP + PQ abs. */
+  int tone_map_enabled;
+  double tone_src_peak;
+  double tone_dst_peak;
+  double tone_dst_black;
   uint32_t flags;
   GCOL_CMYK_Polarity cmyk_polarity;
   /** Borrowed from the profile passed to create_icc; not owned. */
   const gcol_icc_lut_t * lut;
-  uint8_t src_channels; ///< 3 for RGB matrix, lut->input_chan for ICC.
-  uint8_t dst_channels; ///< 3 for RGB, lut->output_chan for B2A.
+  /** Borrowed profile for LUT BPC (bkpt); may be NULL. */
+  const GCOL_ICC_Profile * icc_profile;
+  uint8_t src_channels;
+  uint8_t dst_channels;
 };
 
 static const GCOL_Chromaticity gcol_pcs_d50 = {0.3457, 0.3585};
@@ -80,6 +99,155 @@ static void abs_scale_from_profile(const GCOL_ICC_Profile * profile,
       out[i] = profile->wtpt[i] / gcol_pcs_d50_xyz[i];
     }
   }
+}
+
+static void bpc_identity(double black[3], double white[3]) {
+  black[0] = black[1] = black[2] = 0.0;
+  white[0] = gcol_pcs_d50_xyz[0];
+  white[1] = gcol_pcs_d50_xyz[1];
+  white[2] = gcol_pcs_d50_xyz[2];
+}
+
+/** Map PCS XYZ through source/dest black–white ranges (opt-in BPC). */
+static void apply_bpc(const GCOL_Transform * x, double xyz[3]) {
+  if (!x->bpc_enabled) {
+    return;
+  }
+  for (int i = 0; i < 3; i++) {
+    const double span_s = x->bpc_src_white[i] - x->bpc_src_black[i];
+    const double span_d = x->bpc_dst_white[i] - x->bpc_dst_black[i];
+    if (span_s > 1e-12) {
+      xyz[i] = (xyz[i] - x->bpc_src_black[i]) / span_s * span_d +
+          x->bpc_dst_black[i];
+    }
+  }
+}
+
+/**
+ * Chromaticity-preserving PQ EETF on PCS XYZ: remap Y in nits, scale XZ.
+ * @p xyz is relative to the source peak (Y≈1 at source white); output is
+ * relative to the destination peak (Y≈1 at destination white).
+ */
+static void apply_tone_map(const GCOL_Transform * x, double xyz[3]) {
+  if (!x->tone_map_enabled) {
+    return;
+  }
+  const double y = xyz[1];
+  if (!(y > 0.0) || !(x->tone_dst_peak > 0.0)) {
+    return;
+  }
+  const double nits_in = y * x->tone_src_peak;
+  const double nits_out = gcol_tone_map_pq_eetf(
+      nits_in, x->tone_src_peak, x->tone_dst_peak, x->tone_dst_black);
+  const double y_out = nits_out / x->tone_dst_peak;
+  const double s = y_out / y;
+  xyz[0] *= s;
+  xyz[1] = y_out;
+  xyz[2] *= s;
+}
+
+/** Black as a fraction of white_luminance → PCS XYZ under D50. */
+static void black_from_luminance(const GCOL_Color_Info * info, double black[3]) {
+  black[0] = black[1] = black[2] = 0.0;
+  if (info->black_luminance > 0.0 && info->white_luminance > 0.0) {
+    const double f = info->black_luminance / info->white_luminance;
+    black[0] = f * gcol_pcs_d50_xyz[0];
+    black[1] = f * gcol_pcs_d50_xyz[1];
+    black[2] = f * gcol_pcs_d50_xyz[2];
+  }
+}
+
+static void setup_bpc_matrix(GCOL_Transform * x, const GCOL_Color_Info * src,
+    const GCOL_Color_Info * dst, uint32_t flags) {
+  bpc_identity(x->bpc_src_black, x->bpc_src_white);
+  bpc_identity(x->bpc_dst_black, x->bpc_dst_white);
+  x->bpc_enabled = 0;
+  if ((flags & GCOL_TRANSFORM_BPC) == 0u) {
+    return;
+  }
+  black_from_luminance(src, x->bpc_src_black);
+  black_from_luminance(dst, x->bpc_dst_black);
+  x->bpc_enabled = 1;
+}
+
+static void setup_bpc_icc_src(GCOL_Transform * x, const GCOL_ICC_Profile * src,
+    const GCOL_Color_Info * dst, uint32_t flags) {
+  bpc_identity(x->bpc_src_black, x->bpc_src_white);
+  bpc_identity(x->bpc_dst_black, x->bpc_dst_white);
+  x->bpc_enabled = 0;
+  if ((flags & GCOL_TRANSFORM_BPC) == 0u) {
+    return;
+  }
+  if (src->has_bkpt) {
+    x->bpc_src_black[0] = src->bkpt[0];
+    x->bpc_src_black[1] = src->bkpt[1];
+    x->bpc_src_black[2] = src->bkpt[2];
+  }
+  if (src->has_wtpt) {
+    x->bpc_src_white[0] = src->wtpt[0];
+    x->bpc_src_white[1] = src->wtpt[1];
+    x->bpc_src_white[2] = src->wtpt[2];
+  }
+  black_from_luminance(dst, x->bpc_dst_black);
+  x->bpc_enabled = 1;
+}
+
+static void setup_bpc_icc_dst(GCOL_Transform * x, const GCOL_Color_Info * src,
+    const GCOL_ICC_Profile * dst, uint32_t flags) {
+  bpc_identity(x->bpc_src_black, x->bpc_src_white);
+  bpc_identity(x->bpc_dst_black, x->bpc_dst_white);
+  x->bpc_enabled = 0;
+  if ((flags & GCOL_TRANSFORM_BPC) == 0u) {
+    return;
+  }
+  black_from_luminance(src, x->bpc_src_black);
+  if (dst->has_bkpt) {
+    x->bpc_dst_black[0] = dst->bkpt[0];
+    x->bpc_dst_black[1] = dst->bkpt[1];
+    x->bpc_dst_black[2] = dst->bkpt[2];
+  }
+  if (dst->has_wtpt) {
+    x->bpc_dst_white[0] = dst->wtpt[0];
+    x->bpc_dst_white[1] = dst->wtpt[1];
+    x->bpc_dst_white[2] = dst->wtpt[2];
+  }
+  x->bpc_enabled = 1;
+}
+
+static void setup_tone_map(GCOL_Transform * x, const GCOL_Color_Info * src,
+    const GCOL_Color_Info * dst, uint32_t flags) {
+  x->tone_map_enabled = 0;
+  x->tone_src_peak = 0.0;
+  x->tone_dst_peak = 0.0;
+  x->tone_dst_black = 0.0;
+  if ((flags & GCOL_TRANSFORM_TONE_MAP) == 0u) {
+    return;
+  }
+  if (!src || src->sample_scale != GCOL_SAMPLE_SCALE_ABSOLUTE ||
+      src->transfer != GCOL_TRANSFER_PQ) {
+    return;
+  }
+  double src_peak = src->white_luminance;
+  if (!(src_peak > 0.0)) {
+    src_peak = 10000.0;
+  }
+  double dst_peak = 0.0;
+  if (dst) {
+    dst_peak = dst->white_luminance;
+    if (!(dst_peak > 0.0)) {
+      double conv = 0.0;
+      (void)gcol_transfer_conventions(dst->transfer, NULL, NULL, &conv);
+      dst_peak = conv > 0.0 ? conv : 100.0;
+    }
+    if (dst->black_luminance > 0.0) {
+      x->tone_dst_black = dst->black_luminance;
+    }
+  } else {
+    dst_peak = 100.0;
+  }
+  x->tone_map_enabled = 1;
+  x->tone_src_peak = src_peak;
+  x->tone_dst_peak = dst_peak;
 }
 
 static double clamp01(double v) {
@@ -219,11 +387,16 @@ static void write_channels(const GCOL_Sample_Layout * layout, unsigned char * p,
 }
 
 static GCOL_Result build_rgb_to_pcs(
-    const GCOL_Color_Info * info, double out[9]) {
+    const GCOL_Color_Info * info, int absolute, double out[9]) {
   double m[9];
   GCOL_Result r = gcol_gamut_to_xyz(&info->gamut, m);
   if (r != GCOL_OK) {
     return r;
+  }
+  if (absolute) {
+    /* Absolute colorimetric: keep native XYZ; do not Bradford-adapt to D50. */
+    memcpy(out, m, sizeof(m));
+    return GCOL_OK;
   }
   double adapt[9];
   r = gcol_chromatic_adapt(
@@ -315,13 +488,14 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
     flags = GCOL_TRANSFORM_CLIP;
   }
 
+  const int absolute = (intent == GCOL_INTENT_ABSOLUTE_COLORIMETRIC);
   double src_to_pcs[9];
   double dst_to_pcs[9];
-  GCOL_Result r = build_rgb_to_pcs(src, src_to_pcs);
+  GCOL_Result r = build_rgb_to_pcs(src, absolute, src_to_pcs);
   if (r != GCOL_OK) {
     return r;
   }
-  r = build_rgb_to_pcs(dst, dst_to_pcs);
+  r = build_rgb_to_pcs(dst, absolute, dst_to_pcs);
   if (r != GCOL_OK) {
     return r;
   }
@@ -343,9 +517,13 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
   x->src_channels = 3;
   x->dst_channels = 3;
   x->lut = NULL;
+  x->icc_profile = NULL;
   x->cmyk_polarity = GCOL_CMYK_POLARITY_UNKNOWN;
   x->abs_scale[0] = x->abs_scale[1] = x->abs_scale[2] = 1.0;
-  gcol_mat3_mul(pcs_to_dst, src_to_pcs, x->matrix);
+  memcpy(x->src_to_pcs, src_to_pcs, sizeof(x->src_to_pcs));
+  memcpy(x->pcs_to_dst, pcs_to_dst, sizeof(x->pcs_to_dst));
+  setup_bpc_matrix(x, src, dst, flags);
+  setup_tone_map(x, src, dst, flags);
   *out = x;
   return GCOL_OK;
 }
@@ -382,8 +560,9 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
     flags = GCOL_TRANSFORM_CLIP;
   }
 
+  /* LUT PCS is always D50-relative; destination matrix adapts to D50. */
   double dst_to_pcs[9];
-  GCOL_Result r = build_rgb_to_pcs(dst, dst_to_pcs);
+  GCOL_Result r = build_rgb_to_pcs(dst, 0, dst_to_pcs);
   if (r != GCOL_OK) {
     return r;
   }
@@ -403,11 +582,15 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
   x->kind = GCOL_XFORM_ICC_LUT;
   x->flags = flags;
   x->lut = lut;
+  x->icc_profile = src;
   x->src_channels = lut->input_chan;
   x->dst_channels = 3;
   x->cmyk_polarity = cmyk_polarity;
   abs_scale_from_profile(src, intent, x->abs_scale);
-  memcpy(x->matrix, pcs_to_dst, sizeof(x->matrix));
+  memset(x->src_to_pcs, 0, sizeof(x->src_to_pcs));
+  memcpy(x->pcs_to_dst, pcs_to_dst, sizeof(x->pcs_to_dst));
+  setup_bpc_icc_src(x, src, dst, flags);
+  setup_tone_map(x, NULL, dst, flags); /* device→PCS has no PQ Color_Info */
   *out = x;
   return GCOL_OK;
 }
@@ -445,7 +628,7 @@ GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
   }
 
   double src_to_pcs[9];
-  GCOL_Result r = build_rgb_to_pcs(src, src_to_pcs);
+  GCOL_Result r = build_rgb_to_pcs(src, 0, src_to_pcs);
   if (r != GCOL_OK) {
     return r;
   }
@@ -461,11 +644,15 @@ GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
   x->kind = GCOL_XFORM_ICC_B2A;
   x->flags = flags;
   x->lut = lut;
+  x->icc_profile = dst;
   x->src_channels = 3;
   x->dst_channels = lut->output_chan;
   x->cmyk_polarity = cmyk_polarity;
   abs_scale_from_profile(dst, intent, x->abs_scale);
-  memcpy(x->matrix, src_to_pcs, sizeof(x->matrix));
+  memcpy(x->src_to_pcs, src_to_pcs, sizeof(x->src_to_pcs));
+  memset(x->pcs_to_dst, 0, sizeof(x->pcs_to_dst));
+  setup_bpc_icc_dst(x, src, dst, flags);
+  setup_tone_map(x, src, NULL, flags);
   *out = x;
   return GCOL_OK;
 }
@@ -508,7 +695,9 @@ GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
       lin[1] = decode_to_relative(&xform->src, ch[1]);
       lin[2] = decode_to_relative(&xform->src, ch[2]);
       double xyz[3];
-      gcol_mat3_vec(xform->matrix, lin, xyz);
+      gcol_mat3_vec(xform->src_to_pcs, lin, xyz);
+      apply_tone_map(xform, xyz);
+      apply_bpc(xform, xyz);
       /* Absolute: undo media→D50 mapping before the relative B2A table. */
       xyz[0] /= xform->abs_scale[0];
       xyz[1] /= xform->abs_scale[1];
@@ -555,13 +744,19 @@ GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
       xyz[0] *= xform->abs_scale[0];
       xyz[1] *= xform->abs_scale[1];
       xyz[2] *= xform->abs_scale[2];
-      gcol_mat3_vec(xform->matrix, xyz, lin_dst);
+      apply_bpc(xform, xyz);
+      apply_tone_map(xform, xyz);
+      gcol_mat3_vec(xform->pcs_to_dst, xyz, lin_dst);
     } else {
       double lin[3];
       lin[0] = decode_to_relative(&xform->src, ch[0]);
       lin[1] = decode_to_relative(&xform->src, ch[1]);
       lin[2] = decode_to_relative(&xform->src, ch[2]);
-      gcol_mat3_vec(xform->matrix, lin, lin_dst);
+      double xyz[3];
+      gcol_mat3_vec(xform->src_to_pcs, lin, xyz);
+      apply_bpc(xform, xyz);
+      apply_tone_map(xform, xyz);
+      gcol_mat3_vec(xform->pcs_to_dst, xyz, lin_dst);
     }
 
     if (clip) {

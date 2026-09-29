@@ -560,6 +560,45 @@ TEST(IccLut, AbsoluteScalesByMediaWhite) {
   gcol_icc_free(cmyk);
 }
 
+TEST(IccLut, BpcUsesBkpt) {
+  GCOL_ICC_Profile * cmyk = parse_named("cmyk_abs.icc");
+  ASSERT_NE(cmyk, nullptr);
+  GCOL_Color_Info dst;
+  gcol_color_info_default(&dst);
+  ASSERT_TRUE(gcol_color_info_set_gamut(&dst, GCOL_PRIMARIES_SRGB));
+  dst.transfer = GCOL_TRANSFER_LINEAR;
+
+  GCOL_Transform * plain = nullptr;
+  GCOL_Transform * bpc = nullptr;
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC, 0,
+                  GCOL_CMYK_POLARITY_REFLECTION, &plain),
+      GCOL_OK);
+  ASSERT_EQ(gcol_transform_create_icc(nullptr, cmyk, &dst,
+                  GCOL_INTENT_RELATIVE_COLORIMETRIC,
+                  GCOL_TRANSFORM_CLIP | GCOL_TRANSFORM_BPC,
+                  GCOL_CMYK_POLARITY_REFLECTION, &bpc),
+      GCOL_OK);
+
+  /* Near-black ink: BPC stretches media black toward destination black (0). */
+  float in[4] = {0.95f, 0.95f, 0.95f, 0.95f};
+  float out_plain[3] = {0, 0, 0};
+  float out_bpc[3] = {0, 0, 0};
+  GCOL_Sample_Layout src_layout = {GCOL_SAMPLE_FLOAT32, 4, GCOL_PIXEL_CMYK};
+  GCOL_Sample_Layout dst_layout = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  ASSERT_EQ(
+      gcol_transform_apply(plain, &src_layout, in, &dst_layout, out_plain, 1),
+      GCOL_OK);
+  ASSERT_EQ(
+      gcol_transform_apply(bpc, &src_layout, in, &dst_layout, out_bpc, 1),
+      GCOL_OK);
+  EXPECT_NE(out_plain[1], out_bpc[1]);
+
+  gcol_transform_free(plain);
+  gcol_transform_free(bpc);
+  gcol_icc_free(cmyk);
+}
+
 TEST(IccLut, LabPcsRoundTrip) {
   GCOL_ICC_Profile * lab = parse_named("rgb_lab_mft2.icc");
   ASSERT_NE(lab, nullptr);

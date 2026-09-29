@@ -13,7 +13,7 @@ there with `generate.py`). LUT/CMYK fixtures are produced here by
 | `gray_g22.icc` | grayscale, gamma 2.2 |
 | `swap_rg.icc` | sRGB red/green exchanged, linear — phase-2 gate |
 | `cmyk_mft2.icc` | CMYK AToB1/0/2 + BToA1 (grid=5) — polarity / intent / round-trip |
-| `cmyk_abs.icc` | CMYK AToB1 with non-D50 wtpt — absolute intent |
+| `cmyk_abs.icc` | CMYK AToB1 with non-D50 wtpt + bkpt — absolute intent / BPC |
 | `rgb_mft1.icc` | RGB AToB0 lut8Type — LUT parse / Argyll gate |
 | `rgb_lab_mft2.icc` | RGB Lab PCS AToB1 + BToA1 — Lab round trip |
 | `rgb_mab.icc` | RGB AToB1 lutAtoBType (v4) — mAB parse |

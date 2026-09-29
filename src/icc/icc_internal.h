@@ -53,6 +53,7 @@ typedef struct gcol_icc_lut_s gcol_icc_lut_t;
 #define GCOL_ICC_SIG_GXYZ GCOL_ICC_SIG('g', 'X', 'Y', 'Z')
 #define GCOL_ICC_SIG_BXYZ GCOL_ICC_SIG('b', 'X', 'Y', 'Z')
 #define GCOL_ICC_SIG_WTPT GCOL_ICC_SIG('w', 't', 'p', 't')
+#define GCOL_ICC_SIG_BKPT GCOL_ICC_SIG('b', 'k', 'p', 't')
 #define GCOL_ICC_SIG_RTRC GCOL_ICC_SIG('r', 'T', 'R', 'C')
 #define GCOL_ICC_SIG_GTRC GCOL_ICC_SIG('g', 'T', 'R', 'C')
 #define GCOL_ICC_SIG_BTRC GCOL_ICC_SIG('b', 'T', 'R', 'C')
@@ -119,6 +120,9 @@ struct GCOL_ICC_Profile {
   gcol_icc_lut_t * b2a2;
   /** Media white point from wtpt, when present (D50 if absent). */
   bool has_wtpt;
+  /** Media black point from bkpt, when present. */
+  bool has_bkpt;
+  double bkpt[3];
   unsigned char profile_id[16];
 };
 

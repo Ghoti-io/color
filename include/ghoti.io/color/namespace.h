@@ -78,6 +78,7 @@
 #define gcol_transfer_encode GHOTIIO_COLOR(gcol_transfer_encode)
 #define gcol_linear_to_nits GHOTIIO_COLOR(gcol_linear_to_nits)
 #define gcol_nits_to_linear GHOTIIO_COLOR(gcol_nits_to_linear)
+#define gcol_tone_map_pq_eetf GHOTIIO_COLOR(gcol_tone_map_pq_eetf)
 #define gcol_logluv32_to_xyz GHOTIIO_COLOR(gcol_logluv32_to_xyz)
 #define gcol_xyz_to_logluv32 GHOTIIO_COLOR(gcol_xyz_to_logluv32)
 
