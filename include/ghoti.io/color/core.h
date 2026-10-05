@@ -112,7 +112,7 @@ typedef struct GCOL_Limits {
   size_t curve_samples; ///< Max samples in one curv/para tag.
   size_t profile_bytes; ///< Max profile size in bytes.
   size_t lut_grid;      ///< Max LUT grid points per axis (phase 3).
-  uint8_t _reserved[16];
+  uint8_t _reserved[16]; ///< Reserved; zero.
 } GCOL_Limits;
 
 /**

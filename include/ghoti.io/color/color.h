@@ -49,8 +49,8 @@ extern "C" {
  * library has no name for still arrive intact.
  */
 typedef struct {
-  double x;
-  double y;
+  double x; ///< CIE 1931 x coordinate.
+  double y; ///< CIE 1931 y coordinate.
 } GCOL_Chromaticity;
 
 /**
@@ -63,9 +63,9 @@ typedef struct {
  */
 typedef struct {
   GCOL_Chromaticity white; ///< White point; see GCOL_Color_Info.white_stated.
-  GCOL_Chromaticity red;
-  GCOL_Chromaticity green;
-  GCOL_Chromaticity blue;
+  GCOL_Chromaticity red;   ///< Red primary.
+  GCOL_Chromaticity green; ///< Green primary.
+  GCOL_Chromaticity blue;  ///< Blue primary.
 } GCOL_Gamut;
 
 /**
@@ -216,12 +216,12 @@ typedef struct {
    * carries three endpoints and nowhere to put a white point, and a TIFF may
    * carry WhitePoint without PrimaryChromaticities. */
   bool white_stated;
-  GCOL_Transfer transfer;
+  GCOL_Transfer transfer; ///< The transfer function the file stated.
   /** parametricCurveType terms; see GCOL_TRANSFER_PARAMETRIC. */
   double transfer_params[GCOL_TRANSFER_PARAM_COUNT];
   double gamma_value; ///< Used when transfer == GCOL_TRANSFER_GAMMA.
-  GCOL_Reference reference;
-  GCOL_Sample_Scale sample_scale;
+  GCOL_Reference reference;         ///< What the stored values are relative to.
+  GCOL_Sample_Scale sample_scale;   ///< Whether samples are relative or absolute.
   /**
    * Luminance in cd/m^2 of a full-scale sample, or 0 when unstated.
    *
@@ -237,7 +237,7 @@ typedef struct {
    * @a white_luminance when both are set). ICC `bkpt` feeds the LUT path.
    */
   double black_luminance;
-  GCOL_Rendering_Intent intent;
+  GCOL_Rendering_Intent intent; ///< The rendering intent the file stated.
   const void * icc_bytes; ///< Opaque; library does not take ownership.
   size_t icc_size;        ///< ICC profile size in bytes.
   /** Path of a profile the file named rather than carried, or NULL.
@@ -258,7 +258,7 @@ typedef struct {
   const char * icc_linked_path;
   GCOL_CMYK_Polarity cmyk_polarity; ///< Interpretation of CMYK channels; use
                                     ///< when raster format is GIMG_PIXEL_CMYK8.
-  uint8_t _reserved[4];
+  uint8_t _reserved[4]; ///< Reserved; zero.
 } GCOL_Color_Info;
 
 /**

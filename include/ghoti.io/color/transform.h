@@ -82,7 +82,7 @@ typedef enum {
  * palettes - that stays in libs/image.
  */
 typedef struct GCOL_Sample_Layout {
-  GCOL_Sample_Type type;
+  GCOL_Sample_Type type;  ///< Storage type of one sample.
   unsigned channel_count; ///< RGB: 3 or 4; CMYK: 4.
   GCOL_Pixel_Model model; ///< ::GCOL_PIXEL_RGB by default (zero-init).
 } GCOL_Sample_Layout;
