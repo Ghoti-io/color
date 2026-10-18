@@ -336,7 +336,7 @@ $(APP_DIR)/examples/%$(EXE_EXTENSION): examples/%.c $(APP_DIR)/$(STATIC_TARGET) 
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
-.PHONY: fuzz fuzz-clean oracle-build oracle-version check-argyll check-lcms logluv-vectors
+.PHONY: fuzz fuzz-clean oracle-build oracle-version check-argyll check-lcms logluv-vectors transform-vectors
 
 watch: ## Watch sources and rebuild
 	@while true; do \
@@ -785,6 +785,9 @@ oracle-version: ## Print which Argyll, littleCMS and libtiff pins would answer
 
 logluv-vectors: ## Regenerate tests/data/logluv and the LogLuv24 table from libtiff
 	@python3 $(ORACLE)/gen_logluv.py
+
+transform-vectors: ## Regenerate tests/data/transform/lcms.txt from littleCMS
+	@python3 $(ORACLE)/gen_transform_vectors.py
 
 check-argyll: $(GCOL_ICC_LOOKUP) ## Fail if our device→XYZ disagrees with icclu
 	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) argyll -- \

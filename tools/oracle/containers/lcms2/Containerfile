@@ -21,10 +21,11 @@ RUN printf 'Types: deb\nURIs: http://snapshot.debian.org/archive/debian/%s\nSuit
       > /etc/apt/apt.conf.d/99snapshot
 
 COPY lcms_icc_lookup.c /tmp/lcms_icc_lookup.c
+COPY lcms_transform_vectors.c /tmp/lcms_transform_vectors.c
 COPY lcms2-version /usr/local/bin/lcms2-version
 
 # Runtime library + build toolchain, pinned. The finished image keeps only
-# liblcms2-2 and the two scripts/binaries the gate needs.
+# liblcms2-2 and the scripts/binaries the gates and generators need.
 RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends \
       liblcms2-2=2.16-2+deb13u2 \
@@ -35,8 +36,12 @@ RUN apt-get update -qq \
     && gcc -O2 -Wall -Wextra -o /usr/local/bin/lcms_icc_lookup \
       /tmp/lcms_icc_lookup.c \
       $(pkg-config --cflags --libs lcms2) -lm \
+    && gcc -O2 -Wall -Wextra -Werror -o /usr/local/bin/lcms_transform_vectors \
+      /tmp/lcms_transform_vectors.c \
+      $(pkg-config --cflags --libs lcms2) -lm \
     && chmod 0755 /usr/local/bin/lcms2-version /usr/local/bin/lcms_icc_lookup \
-    && rm -f /tmp/lcms_icc_lookup.c \
+      /usr/local/bin/lcms_transform_vectors \
+    && rm -f /tmp/lcms_icc_lookup.c /tmp/lcms_transform_vectors.c \
     && apt-get purge -y --auto-remove gcc libc6-dev pkg-config liblcms2-dev \
     && rm -rf /var/lib/apt/lists/*
 

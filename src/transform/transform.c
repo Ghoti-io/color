@@ -347,16 +347,25 @@ static void read_channels(const GCOL_Sample_Layout * layout,
   }
 }
 
+/**
+ * A unit-interval sample as the nearest 8-bit code.  Rounded, not truncated:
+ * a code that comes back through the curves as 4.9999 is 5, and truncating
+ * moved 44 of the 256 codes of an sRGB identity down by one.
+ */
+static unsigned char to_u8(double v) {
+  return (unsigned char)(clamp01(v) * 255.0 + 0.5);
+}
+
 static void write_channels(const GCOL_Sample_Layout * layout, unsigned char * p,
     const double * ch, unsigned n, double alpha) {
   switch (layout->type) {
   case GCOL_SAMPLE_UINT8:
     for (unsigned i = 0; i < n; i++) {
-      p[i] = (unsigned char)(clamp01(ch[i]) * 255.0);
+      p[i] = to_u8(ch[i]);
     }
     if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u &&
         n < 4u) {
-      p[3] = (unsigned char)(clamp01(alpha) * 255.0);
+      p[3] = to_u8(alpha);
     }
     break;
   case GCOL_SAMPLE_FLOAT32: {
