@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: LGPL-3.0-only
+#
+# Copyright (C) 2026 Corey Pennycuff
+#
+# This file is part of Ghoti.io Color.
+#
+# Ghoti.io Color is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License version 3 as
+# published by the Free Software Foundation.
+#
+# Ghoti.io Color is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+# License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""Regenerate the LogLuv known-answer vectors and the LogLuv24 cell table.
+
+    gen_logluv.py
+
+Asks libtiff (the `libtiff` pin in containers/IMAGES) through
+`logluv_vectors`, then writes:
+
+  tests/data/logluv/*.txt        what libtiff decodes and encodes, sampled
+  src/math/logluv_uv_table.h     the LogLuv24 u'v' cell table
+
+The table is recovered from libtiff's *answers*: every 14-bit index is
+decoded at one luminance, u'v' is computed back from the XYZ it returned,
+and the rows are read off. Nothing here comes from libtiff's source. The
+script refuses to write a table that does not fit a square grid exactly,
+so a change in the answers fails here rather than in a test.
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, HERE)
+import oracle_env  # noqa: E402
+
+DATA = os.path.join(ROOT, "tests", "data", "logluv")
+TABLE = os.path.join(ROOT, "src", "math", "logluv_uv_table.h")
+
+LICENSE = """/*
+ * SPDX-License-Identifier: LGPL-3.0-only
+ *
+ * Copyright (C) 2026 Corey Pennycuff
+ *
+ * This file is part of Ghoti.io Color.
+ *
+ * Ghoti.io Color is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * Ghoti.io Color is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+ * License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+"""
+
+
+def fail(why):
+    sys.stderr.write("gen_logluv: %s\n" % why)
+    sys.exit(1)
+
+
+def read(path):
+    with open(path, encoding="ascii") as handle:
+        return [line.split() for line in handle]
+
+
+def uv_of(x, y, z):
+    d = x + 15.0 * y + 3.0 * z
+    return 4.0 * x / d, 9.0 * y / d
+
+
+def recover_table(rows24):
+    """The LogLuv24 cell table from 16384 decoded indices at one luminance."""
+    pts = []
+    first_neutral = None
+    for code, x, y, z in rows24[:16384]:
+        x, y, z = float(x), float(y), float(z)
+        index = int(code, 16) & 0x3FFF
+        # An index past the table decodes as equal-energy white, X = Y = Z.
+        if x == y == z:
+            if first_neutral is None:
+                first_neutral = index
+            continue
+        if first_neutral is not None:
+            fail("index %d decodes to a colour after the first neutral %d"
+                 % (index, first_neutral))
+        pts.append(uv_of(x, y, z))
+    if first_neutral is None:
+        fail("no index past the table; expected one")
+    # Rows are runs of equal v'; their spacing is the cell size.
+    starts = [0]
+    for i in range(1, len(pts)):
+        if abs(pts[i][1] - pts[i - 1][1]) > 1e-4:
+            starts.append(i)
+    vs = [pts[s][1] for s in starts]
+    steps = [b - a for a, b in zip(vs, vs[1:])]
+    size = round(sum(steps) / len(steps), 6)
+    vstart = round(vs[0] - size / 2.0, 6)
+    rows = []
+    worst = 0.0
+    for r, s in enumerate(starts):
+        e = starts[r + 1] if r + 1 < len(starts) else len(pts)
+        ustart = round(pts[s][0] - size / 2.0, 6)
+        vc = vstart + (r + 0.5) * size
+        for k in range(s, e):
+            worst = max(worst,
+                        abs(pts[k][0] - (ustart + (k - s + 0.5) * size)),
+                        abs(pts[k][1] - vc))
+        rows.append((ustart, e - s, s))
+    # float32 XYZ carries u'v' to about 1e-7; anything near the 1e-6 the
+    # table is written at means the grid does not fit.
+    if worst > 5e-7:
+        fail("cells do not sit on a %g grid: worst residual %g" % (size, worst))
+    if first_neutral != len(pts):
+        fail("table has %d cells but the first neutral is %d"
+             % (len(pts), first_neutral))
+    return size, vstart, rows, worst
+
+
+def write_table(size, vstart, rows, worst, version):
+    lines = [LICENSE, """
+/*
+ * GENERATED by tools/oracle/gen_logluv.py - do not edit.
+ *
+ * The LogLuv24 u'v' cell table: %d rows of square cells %.6f on a
+ * side, row r centred on v' = %.6f + (r + 0.5) * %.6f.  A 14-bit
+ * index counts cells row by row from the lowest v'.
+ *
+ * Recovered from the answers of %s: every index decoded at one
+ * luminance, u'v' computed back from the XYZ.  Every cell centre fits this
+ * grid to %.1e.  Indices %d and above are not cells.
+ *
+ * The constants are float, not double, because libtiff's answers are
+ * reproduced to float precision only when they are: held as double, Z
+ * differs from libtiff's by up to 5e-7 relative; held as float, by 5e-9.
+ */
+
+#ifndef GHOTI_IO_GCOL_LOGLUV_UV_TABLE_H
+#define GHOTI_IO_GCOL_LOGLUV_UV_TABLE_H
+
+#include <ghoti.io/color/macros.h>
+
+#include <stdint.h>
+
+#define GCOL_LOGLUV24_UV_CELL ((double)%.6ff)
+#define GCOL_LOGLUV24_UV_VSTART ((double)%.6ff)
+#define GCOL_LOGLUV24_UV_ROWS %du
+#define GCOL_LOGLUV24_UV_CELLS %du
+
+typedef struct {
+  float ustart;   ///< u' of the row's left edge.
+  uint16_t count; ///< Cells in the row.
+  uint16_t first; ///< Index of the row's first cell.
+} gcol_logluv24_uv_row;
+
+static const gcol_logluv24_uv_row gcol_logluv24_uv_rows[%d] = {
+""" % (len(rows), size, vstart, size, version, worst,
+       rows[-1][2] + rows[-1][1], size, vstart, len(rows),
+       rows[-1][2] + rows[-1][1], len(rows))]
+    for ustart, count, first in rows:
+        lines.append("    {%.6ff, %d, %d},\n" % (ustart, count, first))
+    lines.append("};\n\n#endif\n")
+    with open(TABLE, "w", encoding="ascii") as handle:
+        handle.write("".join(lines))
+
+
+def sample(rows, keep):
+    return [r for i, r in enumerate(rows) if keep(i, r)]
+
+
+def write_vectors(name, header, rows, version):
+    with open(os.path.join(DATA, name), "w", encoding="ascii") as handle:
+        handle.write("# %s\n# Answered by %s, written by "
+                     "tools/oracle/gen_logluv.py.\n" % (header, version))
+        for r in rows:
+            handle.write(" ".join(r) + "\n")
+
+
+def main():
+    try:
+        version = oracle_env.check_pin("libtiff")
+    except oracle_env.OracleUnavailable as why:
+        fail(str(why))
+    work = tempfile.mkdtemp(prefix="gen_logluv.")
+    try:
+        argv = oracle_env.command("libtiff", ["logluv_vectors", work],
+                                  scratch=work)
+        if subprocess.run(argv).returncode != 0:
+            fail("logluv_vectors failed")
+        got = {n: read(os.path.join(work, n + ".txt")) for n in
+               ("dec_l16", "dec_luv32", "dec_luv24",
+                "enc_l16", "enc_luv32", "enc_luv24")}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    size, vstart, rows, worst = recover_table(got["dec_luv24"])
+    write_table(size, vstart, rows, worst, version)
+
+    os.makedirs(DATA, exist_ok=True)
+    edge16 = set(range(0, 4)) | set(range(0x7FFC, 0x8004)) | \
+        set(range(0xFFFC, 0x10000))
+    write_vectors("dec_l16.txt", "LogL16 code (hex) -> Y",
+                  sample(got["dec_l16"],
+                         lambda i, r: i % 61 == 0 or i in edge16), version)
+    write_vectors("dec_luv32.txt", "LogLuv32 code (hex) -> X Y Z",
+                  sample(got["dec_luv32"],
+                         lambda i, r: i % 67 == 0 or (i % 65536) < 4 or
+                         (i % 65536) > 65531 or
+                         (i % 65536) in (0x7FFF, 0x8000, 0x8001)), version)
+    firsts = {f for _, _, f in rows} | {f + n - 1 for _, n, f in rows}
+    cells = rows[-1][2] + rows[-1][1]
+    write_vectors("dec_luv24.txt", "LogLuv24 code (hex) -> X Y Z",
+                  sample(got["dec_luv24"],
+                         lambda i, r: (i < 16384 and
+                                       (i % 7 == 0 or i in firsts or
+                                        cells - 2 <= i <= cells + 1 or
+                                        i == 16383)) or
+                         (i >= 16384 and ((i - 16384) % 5 == 0 or
+                                          i - 16384 in (1, 1022, 1023)))),
+                  version)
+    special = lambda i: i % 97 == 0 or i % 89 == 0 or i % 83 == 0
+    for n, what in (("enc_l16", "LogL16: Y -> code (hex)"),
+                    ("enc_luv32", "LogLuv32: X Y Z -> code (hex)"),
+                    ("enc_luv24", "LogLuv24: X Y Z -> code (hex)")):
+        picked = sample(got[n], lambda i, r: i % 4 == 0 or special(i))
+        # Hex floats from C, written back as the shortest decimal that
+        # reads to the same float32.
+        out = []
+        for r in picked:
+            vals = [float.fromhex(v) for v in r[:-1]]
+            out.append(["%.9g" % v for v in vals] + [r[-1]])
+        write_vectors(n + ".txt", what + "; libtiff SGILOGENCODE_NODITHER",
+                      out, version)
+    print("wrote %s and %d vector files (%s)"
+          % (os.path.relpath(TABLE, ROOT), 6, version))
+
+
+if __name__ == "__main__":
+    main()

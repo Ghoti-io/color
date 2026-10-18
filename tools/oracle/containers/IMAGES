@@ -10,7 +10,7 @@
 #
 # Building them:
 #   make oracle-build
-# which builds both images named below.
+# which builds every image named below.
 
 # ArgyllCMS 3.3.0 (Debian). Lookups go through icclu (icclib V3.1.0 bundled
 # in the package): it accepts the CMYK and RGB v2 LUT fixtures this library
@@ -25,3 +25,10 @@ argyll	localhost/ghoti-color-oracle-argyll:3.3.0	Lookup ICC or CAL colors, Versi
 # parametricCurveType fixtures Argyll refuses. Not linked into the library —
 # independence from lcms2 stays structural; the gate compares two programs.
 lcms2	localhost/ghoti-color-oracle-lcms2:2.16	LittleCMS 2.16	ICC matrix/TRC, v2 LUT, and v4 mAB device→PCS lookups via liblcms2
+
+# libtiff 4.7.0 (Debian). The SGI LogLuv reference: libtiff's SGILog codec is
+# Larson's own. logluv_vectors (built into the image) writes codes and reads
+# floats, and the reverse; tools/oracle/gen_logluv.py turns its answers into
+# tests/data/logluv/ and src/math/logluv_uv_table.h. Asked only when the
+# vectors are regenerated - make test reads the committed answers.
+libtiff	localhost/ghoti-color-oracle-libtiff:4.7.0	libtiff 4.7.0	LogL16, LogLuv24 and LogLuv32 decode and encode via libtiff's SGILog codec

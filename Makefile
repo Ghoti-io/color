@@ -336,7 +336,7 @@ $(APP_DIR)/examples/%$(EXE_EXTENSION): examples/%.c $(APP_DIR)/$(STATIC_TARGET) 
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
-.PHONY: fuzz fuzz-clean oracle-build oracle-version check-argyll check-lcms
+.PHONY: fuzz fuzz-clean oracle-build oracle-version check-argyll check-lcms logluv-vectors
 
 watch: ## Watch sources and rebuild
 	@while true; do \
@@ -757,6 +757,7 @@ ORACLE := tools/oracle
 ORACLE_RUN := python3 $(ORACLE)/oracle_run.py
 ORACLE_IMAGE_ARGYLL := localhost/ghoti-color-oracle-argyll:3.3.0
 ORACLE_IMAGE_LCMS2 := localhost/ghoti-color-oracle-lcms2:2.16
+ORACLE_IMAGE_LIBTIFF := localhost/ghoti-color-oracle-libtiff:4.7.0
 GCOL_ICC_LOOKUP := $(APP_DIR)/oracle/gcol_icc_lookup$(EXE_EXTENSION)
 
 $(GCOL_ICC_LOOKUP): $(ORACLE)/gcol_icc_lookup.c $(APP_DIR)/$(STATIC_TARGET) \
@@ -766,17 +767,24 @@ $(GCOL_ICC_LOOKUP): $(ORACLE)/gcol_icc_lookup.c $(APP_DIR)/$(STATIC_TARGET) \
 	$(CC) $(CFLAGS) $(INCLUDE) -Isrc -Isrc/icc -o $@ $< $(LDFLAGS) \
 		$(COLORLIBRARY) $(CUTIL_LIBS) -lm
 
-oracle-build: ## Build the pinned ArgyllCMS 3.3.0 and littleCMS 2.16 images
+oracle-build: ## Build the pinned ArgyllCMS 3.3.0, littleCMS 2.16 and libtiff 4.7.0 images
 	docker build -t $(ORACLE_IMAGE_ARGYLL) \
 		-f $(ORACLE)/containers/argyll/Containerfile \
 		$(ORACLE)/containers/argyll
 	docker build -t $(ORACLE_IMAGE_LCMS2) \
 		-f $(ORACLE)/containers/lcms2/Containerfile \
 		$(ORACLE)/containers/lcms2
+	docker build -t $(ORACLE_IMAGE_LIBTIFF) \
+		-f $(ORACLE)/containers/libtiff/Containerfile \
+		$(ORACLE)/containers/libtiff
 
-oracle-version: ## Print which Argyll and littleCMS pins would answer
+oracle-version: ## Print which Argyll, littleCMS and libtiff pins would answer
 	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) argyll -- true
 	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) lcms2 -- true
+	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) libtiff -- true
+
+logluv-vectors: ## Regenerate tests/data/logluv and the LogLuv24 table from libtiff
+	@python3 $(ORACLE)/gen_logluv.py
 
 check-argyll: $(GCOL_ICC_LOOKUP) ## Fail if our device→XYZ disagrees with icclu
 	@GHOTI_ORACLE_REQUIRED=1 $(ORACLE_RUN) argyll -- \

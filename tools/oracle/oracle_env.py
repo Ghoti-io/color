@@ -21,6 +21,8 @@ by `containers/argyll/Containerfile`. Lookups use `icclu` (bundled icclib);
 the version pin is taken from `xicclu`'s banner, which names the ArgyllCMS
 release. `command("lcms2")` is the littleCMS 2 image
 (`containers/lcms2/Containerfile`); lookups use `lcms_icc_lookup`.
+`command("libtiff")` is libtiff 4.7.0 (`containers/libtiff/Containerfile`),
+asked about SGI LogLuv through `logluv_vectors`.
 
 Modes, from GHOTI_ORACLE_MODE:
 
@@ -39,6 +41,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 IMAGES = os.path.join(HERE, "containers", "IMAGES")
 ARGYLL = os.path.join(HERE, "containers", "argyll")
 LCMS2 = os.path.join(HERE, "containers", "lcms2")
+LIBTIFF = os.path.join(HERE, "containers", "libtiff")
 
 MODE = os.environ.get("GHOTI_ORACLE_MODE", "container")
 ENGINE = os.environ.get("GHOTI_CONTAINER_ENGINE", "docker")
@@ -53,6 +56,7 @@ class OracleUnavailable(Exception):
 PROBE = {
     "argyll": (["argyll-version"], "Lookup ICC or CAL colors, Version 3.3.0"),
     "lcms2": (["lcms2-version"], "LittleCMS 2.16"),
+    "libtiff": (["libtiff-version"], "libtiff 4.7.0"),
 }
 
 # Host mode checks this binary's presence; the probe script is how its
@@ -60,6 +64,7 @@ PROBE = {
 BINARY = {
     "argyll": "xicclu",
     "lcms2": "lcms_icc_lookup",
+    "libtiff": "logluv_vectors",
 }
 
 _pins = None
@@ -158,6 +163,7 @@ def _argv(name, argv):
     host_dirs = {
         "argyll": ARGYLL,
         "lcms2": LCMS2,
+        "libtiff": LIBTIFF,
     }
     base = host_dirs.get(name, HERE)
     rewritten = []

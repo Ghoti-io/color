@@ -82,6 +82,10 @@
 #define gcol_tone_map_pq_eetf GHOTIIO_COLOR(gcol_tone_map_pq_eetf)
 #define gcol_logluv32_to_xyz GHOTIIO_COLOR(gcol_logluv32_to_xyz)
 #define gcol_xyz_to_logluv32 GHOTIIO_COLOR(gcol_xyz_to_logluv32)
+#define gcol_logl16_to_y GHOTIIO_COLOR(gcol_logl16_to_y)
+#define gcol_y_to_logl16 GHOTIIO_COLOR(gcol_y_to_logl16)
+#define gcol_logluv24_to_xyz GHOTIIO_COLOR(gcol_logluv24_to_xyz)
+#define gcol_xyz_to_logluv24 GHOTIIO_COLOR(gcol_xyz_to_logluv24)
 
 /* ICC parse and transforms (phase 2–3). */
 #define GCOL_Limits GHOTIIO_COLOR(GCOL_Limits)

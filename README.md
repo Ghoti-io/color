@@ -17,8 +17,8 @@ transfer-convention tables, H.273 CICP → description
 (`gcol_cicp_to_color_info`), matrix/TRC and LUT ICC parse
 (`gcol_icc_write` / `gcol_icc_parse`), colour maths, relative-colorimetric
 RGB↔RGB transforms, CMYK LUT transforms with `cmyk_polarity`, PQ/HLG with
-absolute scale, and LogLuv32↔XYZ helpers. `libs/image` depends on this
-library for the description types. The plan is in the workspace at
+absolute scale, and SGI LogL16, LogLuv24 and LogLuv32 ↔ XYZ. `libs/image`
+depends on this library for the description types. The plan is in the workspace at
 `planning/color.md`.
 
 | Phase | Content | Status |

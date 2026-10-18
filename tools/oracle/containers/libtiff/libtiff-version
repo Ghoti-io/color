@@ -1,0 +1,6 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-3.0-only
+# Print the pin string tools/oracle/containers/IMAGES expects: the upstream
+# version of the libtiff the vector tool is linked against.
+set -eu
+printf 'libtiff %s\n' "$(dpkg-query -W -f='${Version}' libtiff6 | sed 's/[-+].*//')"

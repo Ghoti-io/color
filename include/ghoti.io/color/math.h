@@ -127,17 +127,66 @@ GCOL_API double gcol_tone_map_pq_eetf(double nits_in, double source_peak,
     double target_peak, double target_black);
 
 /**
+ * @brief Decode a 16-bit SGI LogL pixel (TIFF photometric 32844) to Y.
+ *
+ * Bit 15 is the sign; the other fifteen are log2 luminance in 1/256 steps
+ * from 2^-64.  Code 0 (and 0x8000) is Y = 0.  Y is absolute and
+ * scene-referred, in the file's units: multiply by the TIFF StoNits tag for
+ * cd/m^2.
+ */
+GCOL_API double gcol_logl16_to_y(uint16_t encoded);
+
+/**
+ * @brief Encode Y as a 16-bit SGI LogL pixel; truncates, as libtiff does.
+ *
+ * Magnitudes past 2^64 saturate to 0x7fff (or 0xffff); below the smallest
+ * code, and NaN, give 0.
+ */
+GCOL_API uint16_t gcol_y_to_logl16(double y);
+
+/**
  * @brief Decode a 32-bit SGI LogLuv pixel (TIFF SGILOG) to CIE XYZ.
  *
- * LogLuv is scene-referred and absolute: Y is in cd/m^2 (approximately).
- * The XYZ can be fed into a transform whose source is linear XYZ/RGB.
+ * The upper half is a LogL16 code (see ::gcol_logl16_to_y), the lower two
+ * bytes u' and v' in 1/410 steps.  Y is absolute and scene-referred, in the
+ * file's units; X and Z are on the same scale.  A negative Y (the sign bit)
+ * decodes as black, as libtiff does; ::gcol_logl16_to_y keeps the sign.
+ *
+ * @return ::GCOL_OK, or ::GCOL_ERR_INVALID if @p xyz is NULL.
  */
 GCOL_API GCOL_Result gcol_logluv32_to_xyz(uint32_t encoded, double xyz[3]);
 
 /**
  * @brief Encode CIE XYZ as a 32-bit SGI LogLuv pixel.
+ *
+ * Truncates, as libtiff's undithered encoder does.  A chromaticity that is
+ * undefined (Y = 0, or X + 15Y + 3Z not positive) is written as equal-energy
+ * white.
  */
 GCOL_API GCOL_Result gcol_xyz_to_logluv32(const double xyz[3], uint32_t * out);
+
+/**
+ * @brief Decode a 24-bit SGI LogLuv pixel (TIFF SGILOG24) to CIE XYZ.
+ *
+ * Bits 14..23 are log2 luminance in 1/64 steps from 2^-12 (so Y < 16);
+ * bits 0..13 index a cell of a 0.0035 grid over the u'v' gamut.  An index
+ * past the last cell decodes as equal-energy white, as libtiff does.  Only
+ * the low 24 bits of @p encoded are read.
+ *
+ * @return ::GCOL_OK, or ::GCOL_ERR_INVALID if @p xyz is NULL.
+ */
+GCOL_API GCOL_Result gcol_logluv24_to_xyz(uint32_t encoded, double xyz[3]);
+
+/**
+ * @brief Encode CIE XYZ as a 24-bit SGI LogLuv pixel.
+ *
+ * Truncates; Y of 16 and above saturates.  An undefined chromaticity is
+ * written as equal-energy white's cell.  One outside the grid is written as
+ * the first cell on the line from it to equal-energy white; libtiff picks a
+ * boundary cell by angle instead, so for those pixels the two can differ by
+ * a cell.
+ */
+GCOL_API GCOL_Result gcol_xyz_to_logluv24(const double xyz[3], uint32_t * out);
 
 #ifdef __cplusplus
 }
