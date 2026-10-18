@@ -130,6 +130,61 @@ TEST(TransformLcms, FloatToEightBitsRoundsAsLittleCmsDoes) {
   gcol_transform_free(x);
 }
 
+namespace {
+
+bool near(double got, double want) {
+  return std::fabs(got - want) <= 2e-4 * std::fmax(1.0, std::fabs(want));
+}
+
+} // namespace
+
+// Float in, float out: nothing clipped.  Linear 2.0 is sRGB 1.353, 179 is
+// 9.106, -0.1 is -1.292 - the curve continued past both ends, which is what
+// littleCMS answers and what a scene-referred raster needs from a transform.
+TEST(TransformLcms, FloatTransformsAreUnboundedAsLittleCmsIs) {
+  const auto v = vectors();
+  const auto & lines = v.at("float_unbounded");
+  ASSERT_GT(lines.size(), 8u);
+  GCOL_Color_Info a = linear_srgb(), b = srgb();
+  GCOL_Transform * x = nullptr;
+  ASSERT_EQ(gcol_transform_create(nullptr, &a, &b,
+                GCOL_INTENT_RELATIVE_COLORIMETRIC, 0, &x),
+      GCOL_OK);
+  const GCOL_Sample_Layout lf = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  size_t outside = 0;
+  for (const Line & l : lines) {
+    const float in[3] = {(float)l.in[0], (float)l.in[1], (float)l.in[2]};
+    float out[3];
+    ASSERT_EQ(gcol_transform_apply(x, &lf, in, &lf, out, 1), GCOL_OK);
+    for (int c = 0; c < 3; c++) {
+      EXPECT_TRUE(near(out[c], l.out[c]))
+          << l.in[0] << " " << l.in[1] << " " << l.in[2] << " channel " << c
+          << ": " << out[c] << " vs littleCMS " << l.out[c];
+      outside += (l.out[c] > 1.0 || l.out[c] < 0.0) ? 1u : 0u;
+    }
+  }
+  EXPECT_GT(outside, 6u); // The section is about values past 0..1.
+  gcol_transform_free(x);
+}
+
+// GCOL_TRANSFORM_CLIP still clips a float destination, for a caller who
+// wants display-range floats.
+TEST(TransformLcms, ClipFlagClipsFloatToo) {
+  GCOL_Color_Info a = linear_srgb(), b = srgb();
+  GCOL_Transform * x = nullptr;
+  ASSERT_EQ(gcol_transform_create(nullptr, &a, &b,
+                GCOL_INTENT_RELATIVE_COLORIMETRIC, GCOL_TRANSFORM_CLIP, &x),
+      GCOL_OK);
+  const GCOL_Sample_Layout lf = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  const float in[3] = {2.0f, -0.1f, 0.5f};
+  float out[3];
+  ASSERT_EQ(gcol_transform_apply(x, &lf, in, &lf, out, 1), GCOL_OK);
+  EXPECT_EQ(out[0], 1.0f);
+  EXPECT_EQ(out[1], 0.0f);
+  EXPECT_NEAR(out[2], 0.735357, 2e-4);
+  gcol_transform_free(x);
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

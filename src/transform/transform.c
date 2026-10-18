@@ -493,9 +493,6 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
   if (!alloc) {
     alloc = gcol_allocator_default();
   }
-  if (flags == 0u) {
-    flags = GCOL_TRANSFORM_CLIP;
-  }
 
   const int absolute = (intent == GCOL_INTENT_ABSOLUTE_COLORIMETRIC);
   double src_to_pcs[9];
@@ -565,9 +562,6 @@ GCOL_API GCOL_Result gcol_transform_create_icc(const GCOL_Allocator * alloc,
   if (!alloc) {
     alloc = gcol_allocator_default();
   }
-  if (flags == 0u) {
-    flags = GCOL_TRANSFORM_CLIP;
-  }
 
   /* LUT PCS is always D50-relative; destination matrix adapts to D50. */
   double dst_to_pcs[9];
@@ -632,9 +626,6 @@ GCOL_API GCOL_Result gcol_transform_create_to_icc(const GCOL_Allocator * alloc,
   if (!alloc) {
     alloc = gcol_allocator_default();
   }
-  if (flags == 0u) {
-    flags = GCOL_TRANSFORM_CLIP;
-  }
 
   double src_to_pcs[9];
   GCOL_Result r = build_rgb_to_pcs(src, 0, src_to_pcs);
@@ -690,7 +681,13 @@ GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
   const size_t dst_stride = sample_stride(dst_layout);
   const unsigned char * sp = (const unsigned char *)src;
   unsigned char * dp = (unsigned char *)dst;
-  const int clip = (xform->flags & GCOL_TRANSFORM_CLIP) != 0;
+  // An integer can only hold [0, 1], so eight-bit output is always clipped;
+  // float output keeps whatever the coordinates come to - brighter than
+  // white, outside the gamut - unless the caller asks for CLIP.  That is
+  // littleCMS's convention for float transforms, and what keeps a transform
+  // a change of coordinates rather than a tone map.
+  const int clip = (xform->flags & GCOL_TRANSFORM_CLIP) != 0 ||
+      dst_layout->type == GCOL_SAMPLE_UINT8;
 
   for (size_t i = 0; i < pixel_count; i++) {
     double ch[4] = {0, 0, 0, 0};

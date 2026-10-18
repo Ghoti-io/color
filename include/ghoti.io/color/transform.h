@@ -92,7 +92,18 @@ typedef struct GCOL_Sample_Layout {
  */
 typedef struct GCOL_Transform GCOL_Transform;
 
-/** Clip out-of-gamut linear RGB to [0, 1] before encoding (default on). */
+/**
+ * Clip float output to [0, 1] too.
+ *
+ * Eight-bit output is always clipped, because nothing else fits.  Float
+ * output is not, without this flag: a value brighter than white or outside
+ * the destination gamut comes out as the number it is, with the transfer
+ * curves continued past both ends (sRGB's linear segment below zero, its
+ * power segment above one).  That is littleCMS's convention for float
+ * transforms (tests/data/transform/lcms.txt), and it keeps a transform a
+ * change of coordinates: bringing light above white into range is a tone
+ * map, and ::GCOL_TRANSFORM_TONE_MAP is the one that exists.
+ */
 #define GCOL_TRANSFORM_CLIP 1u
 
 /**
@@ -123,7 +134,7 @@ typedef struct GCOL_Transform GCOL_Transform;
  * @param src Source description. Must state primaries, white, and transfer.
  * @param dst Destination description; same requirements.
  * @param intent Rendering intent.
- * @param flags Bitwise-or of GCOL_TRANSFORM_* flags; 0 means CLIP.
+ * @param flags Bitwise-or of GCOL_TRANSFORM_* flags, or 0.
  * @param out Receives the transform. Free with ::gcol_transform_free.
  */
 GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
