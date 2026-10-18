@@ -72,6 +72,9 @@ typedef enum {
 typedef enum {
   GCOL_PIXEL_RGB = 0, ///< 3 = RGB, 4 = RGBA (alpha copied through).
   GCOL_PIXEL_CMYK,    ///< 4 channels; polarity from the transform source.
+  /** 1 = gray, 2 = gray and alpha (copied through).  Only for a transform
+   *  built by ::gcol_transform_create_model with a gray endpoint. */
+  GCOL_PIXEL_GRAY,
   GCOL_PIXEL_COUNT
 } GCOL_Pixel_Model;
 
@@ -79,11 +82,13 @@ typedef enum {
  * @brief How samples sit in memory for ::gcol_transform_apply.
  *
  * Interleaved only. Nothing here describes compression, subsampling, or
- * palettes - that stays in libs/image.
+ * palettes - that stays in libs/image.  The model must match the transform's
+ * side: RGB for an RGB endpoint, GRAY for a gray one, CMYK for a CMYK
+ * profile.
  */
 typedef struct GCOL_Sample_Layout {
   GCOL_Sample_Type type;  ///< Storage type of one sample.
-  unsigned channel_count; ///< RGB: 3 or 4; CMYK: 4.
+  unsigned channel_count; ///< RGB: 3 or 4; CMYK: 4; GRAY: 1 or 2.
   GCOL_Pixel_Model model; ///< ::GCOL_PIXEL_RGB by default (zero-init).
 } GCOL_Sample_Layout;
 
@@ -139,6 +144,27 @@ typedef struct GCOL_Transform GCOL_Transform;
  */
 GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
     const GCOL_Color_Info * src, const GCOL_Color_Info * dst,
+    GCOL_Rendering_Intent intent, uint32_t flags, GCOL_Transform ** out);
+
+/**
+ * @brief ::gcol_transform_create with either side gray.
+ *
+ * @p src_model and @p dst_model are ::GCOL_PIXEL_RGB or ::GCOL_PIXEL_GRAY.
+ * A gray endpoint needs a white point and a transfer and no primaries - what
+ * ::gcol_icc_to_color_info gives for a gray profile.  Gray maps to the PCS
+ * as its white scaled by the linear sample (ICC.1 F.2), so under relative
+ * intent it is the neutral of the other side, and a gray destination takes
+ * the PCS luminance, Y.  The buffers passed to ::gcol_transform_apply then
+ * use ::GCOL_PIXEL_GRAY on the gray side.  CMYK goes through the ICC
+ * functions below, not this one.
+ *
+ * @return ::GCOL_ERR_INVALID for a model this does not take or an endpoint
+ *   that does not state what its model needs; otherwise as
+ *   ::gcol_transform_create.
+ */
+GCOL_API GCOL_Result gcol_transform_create_model(const GCOL_Allocator * alloc,
+    const GCOL_Color_Info * src, GCOL_Pixel_Model src_model,
+    const GCOL_Color_Info * dst, GCOL_Pixel_Model dst_model,
     GCOL_Rendering_Intent intent, uint32_t flags, GCOL_Transform ** out);
 
 /**

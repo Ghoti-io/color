@@ -18,9 +18,12 @@
 #include "test_helpers.h"
 
 #include <ghoti.io/color/color.h>
+#include <ghoti.io/color/icc.h>
 #include <ghoti.io/color/transform.h>
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <cstdlib>
 #include <fstream>
 #include <map>
@@ -183,6 +186,166 @@ TEST(TransformLcms, ClipFlagClipsFloatToo) {
   EXPECT_EQ(out[1], 0.0f);
   EXPECT_NEAR(out[2], 0.735357, 2e-4);
   gcol_transform_free(x);
+}
+
+namespace {
+
+/** gray_g22.icc as a description: white and transfer, no primaries. */
+GCOL_Color_Info gray_g22() {
+  GCOL_Color_Info i;
+  gcol_color_info_default(&i);
+  std::ifstream f(std::string(GCOL_TEST_DATA "/icc/gray_g22.icc"),
+      std::ios::binary);
+  const std::vector<unsigned char> b(
+      (std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  GCOL_ICC_Profile * p = nullptr;
+  EXPECT_EQ(gcol_icc_parse(nullptr, nullptr, b.data(), b.size(), &p),
+      GCOL_OK);
+  if (p) {
+    EXPECT_EQ(gcol_icc_to_color_info(p, &i), GCOL_OK);
+    gcol_icc_free(p);
+  }
+  EXPECT_FALSE(i.primaries_stated);
+  EXPECT_TRUE(i.white_stated);
+  return i;
+}
+
+GCOL_Transform * make(const GCOL_Color_Info & a, GCOL_Pixel_Model am,
+    const GCOL_Color_Info & b, GCOL_Pixel_Model bm) {
+  GCOL_Transform * x = nullptr;
+  EXPECT_EQ(gcol_transform_create_model(nullptr, &a, am, &b, bm,
+                GCOL_INTENT_RELATIVE_COLORIMETRIC, 0, &x),
+      GCOL_OK);
+  return x;
+}
+
+} // namespace
+
+// Every 8-bit code of a gamma-2.2 gray profile into sRGB, against
+// littleCMS: a neutral, within one code.
+TEST(TransformLcms, GrayToSrgbMatchesLittleCms) {
+  const auto v = vectors();
+  const auto & lines = v.at("gray_to_srgb_u8");
+  ASSERT_EQ(lines.size(), 256u);
+  GCOL_Transform * x =
+      make(gray_g22(), GCOL_PIXEL_GRAY, srgb(), GCOL_PIXEL_RGB);
+  ASSERT_NE(x, nullptr);
+  const GCOL_Sample_Layout lg = {GCOL_SAMPLE_UINT8, 1, GCOL_PIXEL_GRAY};
+  const GCOL_Sample_Layout lr = {GCOL_SAMPLE_UINT8, 3, GCOL_PIXEL_RGB};
+  int worst = 0;
+  for (const Line & l : lines) {
+    const unsigned char in = (unsigned char)l.in[0];
+    unsigned char out[3];
+    ASSERT_EQ(gcol_transform_apply(x, &lg, &in, &lr, out, 1), GCOL_OK);
+    for (int c = 0; c < 3; c++) {
+      worst = std::max(worst, std::abs((int)out[c] - (int)l.out[c]));
+    }
+  }
+  EXPECT_LE(worst, 1);
+  gcol_transform_free(x);
+}
+
+// sRGB colours into a gray destination are their luminance: neutrals,
+// primaries and mixtures, against littleCMS within one code.
+TEST(TransformLcms, SrgbToGrayIsLuminanceAsLittleCmsHasIt) {
+  const auto v = vectors();
+  const auto & lines = v.at("srgb_to_gray_u8");
+  ASSERT_GT(lines.size(), 20u);
+  GCOL_Transform * x =
+      make(srgb(), GCOL_PIXEL_RGB, gray_g22(), GCOL_PIXEL_GRAY);
+  ASSERT_NE(x, nullptr);
+  const GCOL_Sample_Layout lg = {GCOL_SAMPLE_UINT8, 1, GCOL_PIXEL_GRAY};
+  const GCOL_Sample_Layout lr = {GCOL_SAMPLE_UINT8, 3, GCOL_PIXEL_RGB};
+  for (const Line & l : lines) {
+    const unsigned char in[3] = {(unsigned char)l.in[0],
+        (unsigned char)l.in[1], (unsigned char)l.in[2]};
+    unsigned char out = 0;
+    ASSERT_EQ(gcol_transform_apply(x, &lr, in, &lg, &out, 1), GCOL_OK);
+    EXPECT_LE(std::abs((int)out - (int)l.out[0]), 1)
+        << l.in[0] << " " << l.in[1] << " " << l.in[2] << ": " << (int)out
+        << " vs littleCMS " << l.out[0];
+  }
+  gcol_transform_free(x);
+}
+
+// Gray float into sRGB float, past 1 as well.  One line is left out by
+// name: littleCMS evaluates a pure gamma curve at a negative sample as 0,
+// and this library's GAMMA mirrors the sign (-(-v)^g), so gray -0.2 is
+// black there and a negative linear value here.  Both are conventions; the
+// sRGB curve, where the two agree, is the one the float section above pins.
+TEST(TransformLcms, GrayFloatIsUnboundedAsLittleCmsIs) {
+  const auto v = vectors();
+  const auto & lines = v.at("gray_to_srgb_f");
+  ASSERT_GT(lines.size(), 6u);
+  GCOL_Transform * x =
+      make(gray_g22(), GCOL_PIXEL_GRAY, srgb(), GCOL_PIXEL_RGB);
+  ASSERT_NE(x, nullptr);
+  const GCOL_Sample_Layout lg = {GCOL_SAMPLE_FLOAT32, 1, GCOL_PIXEL_GRAY};
+  const GCOL_Sample_Layout lr = {GCOL_SAMPLE_FLOAT32, 3, GCOL_PIXEL_RGB};
+  size_t compared = 0, above = 0;
+  for (const Line & l : lines) {
+    if (l.in[0] < 0.0) {
+      continue;
+    }
+    const float in = (float)l.in[0];
+    float out[3];
+    ASSERT_EQ(gcol_transform_apply(x, &lg, &in, &lr, out, 1), GCOL_OK);
+    for (int c = 0; c < 3; c++) {
+      EXPECT_TRUE(near(out[c], l.out[c]))
+          << l.in[0] << " channel " << c << ": " << out[c]
+          << " vs littleCMS " << l.out[c];
+    }
+    above += l.out[0] > 1.0 ? 1u : 0u;
+    compared++;
+  }
+  EXPECT_EQ(compared, lines.size() - 1u);
+  EXPECT_GE(above, 2u);
+  gcol_transform_free(x);
+}
+
+// Gray and alpha: the second channel is copied through, both ways, and a
+// gray-to-gray transform between the same description is the identity.
+TEST(TransformLcms, GrayAlphaIsCopiedAndGrayToGrayIsIdentity) {
+  const GCOL_Color_Info g = gray_g22();
+  GCOL_Transform * x = make(g, GCOL_PIXEL_GRAY, g, GCOL_PIXEL_GRAY);
+  ASSERT_NE(x, nullptr);
+  const GCOL_Sample_Layout la = {GCOL_SAMPLE_UINT8, 2, GCOL_PIXEL_GRAY};
+  std::vector<unsigned char> in(512), out(512);
+  for (int i = 0; i < 256; i++) {
+    in[2 * i] = (unsigned char)i;
+    in[2 * i + 1] = (unsigned char)(255 - i);
+  }
+  ASSERT_EQ(gcol_transform_apply(x, &la, in.data(), &la, out.data(), 256),
+      GCOL_OK);
+  EXPECT_EQ(in, out);
+  gcol_transform_free(x);
+
+  x = make(g, GCOL_PIXEL_GRAY, srgb(), GCOL_PIXEL_RGB);
+  const GCOL_Sample_Layout lr = {GCOL_SAMPLE_UINT8, 4, GCOL_PIXEL_RGB};
+  const unsigned char ga[2] = {128, 77};
+  unsigned char rgba[4] = {0, 0, 0, 0};
+  ASSERT_EQ(gcol_transform_apply(x, &la, ga, &lr, rgba, 1), GCOL_OK);
+  EXPECT_EQ(rgba[3], 77);
+  gcol_transform_free(x);
+}
+
+// A layout whose model does not match the side it is for is refused, and so
+// is a gray endpoint used as RGB (no primaries).
+TEST(TransformLcms, GrayModelsAreCheckedAgainstTheirSide) {
+  const GCOL_Color_Info g = gray_g22();
+  GCOL_Transform * x = make(g, GCOL_PIXEL_GRAY, srgb(), GCOL_PIXEL_RGB);
+  ASSERT_NE(x, nullptr);
+  const GCOL_Sample_Layout lr = {GCOL_SAMPLE_UINT8, 3, GCOL_PIXEL_RGB};
+  unsigned char in[3] = {1, 2, 3}, out[3];
+  EXPECT_EQ(gcol_transform_apply(x, &lr, in, &lr, out, 1), GCOL_ERR_INVALID);
+  gcol_transform_free(x);
+  GCOL_Transform * y = nullptr;
+  EXPECT_EQ(gcol_transform_create(nullptr, &g, &g,
+                GCOL_INTENT_RELATIVE_COLORIMETRIC, 0, &y),
+      GCOL_ERR_INVALID);
+  EXPECT_EQ(gcol_transform_create_model(nullptr, &g, GCOL_PIXEL_CMYK, &g,
+                GCOL_PIXEL_GRAY, GCOL_INTENT_RELATIVE_COLORIMETRIC, 0, &y),
+      GCOL_ERR_INVALID);
 }
 
 int main(int argc, char ** argv) {

@@ -268,11 +268,15 @@ static bool layout_ok_src(
   if (layout->model == GCOL_PIXEL_CMYK) {
     return layout->channel_count == 4u && x->src_channels == 4u;
   }
-  if (layout->model != GCOL_PIXEL_RGB && layout->model != 0) {
+  if (layout->model == GCOL_PIXEL_GRAY) {
+    return x->src_channels == 1u &&
+        (layout->channel_count == 1u || layout->channel_count == 2u);
+  }
+  if (layout->model != GCOL_PIXEL_RGB) {
     return false;
   }
-  if (x->src_channels == 4u) {
-    /* ICC CMYK source requires CMYK layout. */
+  if (x->src_channels != 3u) {
+    /* A CMYK profile needs a CMYK layout, a gray endpoint a gray one. */
     return false;
   }
   return layout->channel_count == 3u || layout->channel_count == 4u;
@@ -286,7 +290,11 @@ static bool layout_ok_dst(
   if (layout->model == GCOL_PIXEL_CMYK) {
     return layout->channel_count == 4u && x->dst_channels == 4u;
   }
-  if (x->dst_channels == 4u) {
+  if (layout->model == GCOL_PIXEL_GRAY) {
+    return x->dst_channels == 1u &&
+        (layout->channel_count == 1u || layout->channel_count == 2u);
+  }
+  if (layout->model != GCOL_PIXEL_RGB || x->dst_channels != 3u) {
     return false;
   }
   return layout->channel_count == 3u || layout->channel_count == 4u;
@@ -318,8 +326,8 @@ static void read_channels(const GCOL_Sample_Layout * layout,
     for (unsigned i = 0; i < n; i++) {
       ch[i] = (double)p[i] / 255.0;
     }
-    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u) {
-      *alpha = (double)p[3] / 255.0;
+    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == n + 1u) {
+      *alpha = (double)p[n] / 255.0;
     }
     break;
   case GCOL_SAMPLE_FLOAT32: {
@@ -327,8 +335,8 @@ static void read_channels(const GCOL_Sample_Layout * layout,
     for (unsigned i = 0; i < n; i++) {
       ch[i] = (double)f[i];
     }
-    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u) {
-      *alpha = (double)f[3];
+    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == n + 1u) {
+      *alpha = (double)f[n];
     }
     break;
   }
@@ -337,8 +345,8 @@ static void read_channels(const GCOL_Sample_Layout * layout,
     for (unsigned i = 0; i < n; i++) {
       ch[i] = d[i];
     }
-    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u) {
-      *alpha = d[3];
+    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == n + 1u) {
+      *alpha = d[n];
     }
     break;
   }
@@ -363,9 +371,8 @@ static void write_channels(const GCOL_Sample_Layout * layout, unsigned char * p,
     for (unsigned i = 0; i < n; i++) {
       p[i] = to_u8(ch[i]);
     }
-    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u &&
-        n < 4u) {
-      p[3] = to_u8(alpha);
+    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == n + 1u) {
+      p[n] = to_u8(alpha);
     }
     break;
   case GCOL_SAMPLE_FLOAT32: {
@@ -373,9 +380,8 @@ static void write_channels(const GCOL_Sample_Layout * layout, unsigned char * p,
     for (unsigned i = 0; i < n; i++) {
       f[i] = (float)ch[i];
     }
-    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u &&
-        n < 4u) {
-      f[3] = (float)alpha;
+    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == n + 1u) {
+      f[n] = (float)alpha;
     }
     break;
   }
@@ -384,9 +390,8 @@ static void write_channels(const GCOL_Sample_Layout * layout, unsigned char * p,
     for (unsigned i = 0; i < n; i++) {
       d[i] = ch[i];
     }
-    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == 4u &&
-        n < 4u) {
-      d[3] = alpha;
+    if (layout->model != GCOL_PIXEL_CMYK && layout->channel_count == n + 1u) {
+      d[n] = alpha;
     }
     break;
   }
@@ -467,8 +472,42 @@ static void copy_info(GCOL_Color_Info * dst, const GCOL_Color_Info * src) {
   dst->icc_linked_path = NULL;
 }
 
+/**
+ * A gray endpoint as a 3x3 on (lin, 0, 0): the white scaled by the sample
+ * (ICC.1 F.2) - D50 under relative intent, the stated white under absolute.
+ */
+static GCOL_Result build_gray_to_pcs(
+    const GCOL_Color_Info * info, int absolute, double out[9]) {
+  double w[3];
+  if (absolute) {
+    const GCOL_Chromaticity c = info->gamut.white;
+    if (!(c.y > 0.0)) {
+      return GCOL_ERR_INVALID;
+    }
+    w[0] = c.x / c.y;
+    w[1] = 1.0;
+    w[2] = (1.0 - c.x - c.y) / c.y;
+  }
+  else {
+    memcpy(w, gcol_pcs_d50_xyz, sizeof(w));
+  }
+  memset(out, 0, 9 * sizeof(double));
+  out[0] = w[0];
+  out[3] = w[1];
+  out[6] = w[2];
+  return GCOL_OK;
+}
+
 GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
     const GCOL_Color_Info * src, const GCOL_Color_Info * dst,
+    GCOL_Rendering_Intent intent, uint32_t flags, GCOL_Transform ** out) {
+  return gcol_transform_create_model(alloc, src, GCOL_PIXEL_RGB, dst,
+      GCOL_PIXEL_RGB, intent, flags, out);
+}
+
+GCOL_API GCOL_Result gcol_transform_create_model(const GCOL_Allocator * alloc,
+    const GCOL_Color_Info * src, GCOL_Pixel_Model src_model,
+    const GCOL_Color_Info * dst, GCOL_Pixel_Model dst_model,
     GCOL_Rendering_Intent intent, uint32_t flags, GCOL_Transform ** out) {
   if (!out) {
     return GCOL_ERR_INVALID;
@@ -477,8 +516,16 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
   if (!src || !dst) {
     return GCOL_ERR_INVALID;
   }
-  if (!src->primaries_stated || !src->white_stated || !dst->primaries_stated ||
-      !dst->white_stated) {
+  if ((src_model != GCOL_PIXEL_RGB && src_model != GCOL_PIXEL_GRAY) ||
+      (dst_model != GCOL_PIXEL_RGB && dst_model != GCOL_PIXEL_GRAY)) {
+    return GCOL_ERR_INVALID;
+  }
+  const bool src_gray = src_model == GCOL_PIXEL_GRAY;
+  const bool dst_gray = dst_model == GCOL_PIXEL_GRAY;
+  // Gray needs a white and nothing else; RGB needs primaries too.
+  if (!src->white_stated || !dst->white_stated ||
+      (!src_gray && !src->primaries_stated) ||
+      (!dst_gray && !dst->primaries_stated)) {
     return GCOL_ERR_INVALID;
   }
   if (src->transfer == GCOL_TRANSFER_UNKNOWN ||
@@ -496,18 +543,27 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
 
   const int absolute = (intent == GCOL_INTENT_ABSOLUTE_COLORIMETRIC);
   double src_to_pcs[9];
-  double dst_to_pcs[9];
-  GCOL_Result r = build_rgb_to_pcs(src, absolute, src_to_pcs);
-  if (r != GCOL_OK) {
-    return r;
-  }
-  r = build_rgb_to_pcs(dst, absolute, dst_to_pcs);
+  GCOL_Result r = src_gray ? build_gray_to_pcs(src, absolute, src_to_pcs)
+                           : build_rgb_to_pcs(src, absolute, src_to_pcs);
   if (r != GCOL_OK) {
     return r;
   }
   double pcs_to_dst[9];
-  if (!gcol_mat3_inv(dst_to_pcs, pcs_to_dst)) {
-    return GCOL_ERR_UNSUPPORTED;
+  if (dst_gray) {
+    // The PCS luminance, as a fraction of the destination's white: Y, since
+    // both the D50 PCS white and a stated white have Y = 1.
+    memset(pcs_to_dst, 0, sizeof(pcs_to_dst));
+    pcs_to_dst[1] = 1.0;
+  }
+  else {
+    double dst_to_pcs[9];
+    r = build_rgb_to_pcs(dst, absolute, dst_to_pcs);
+    if (r != GCOL_OK) {
+      return r;
+    }
+    if (!gcol_mat3_inv(dst_to_pcs, pcs_to_dst)) {
+      return GCOL_ERR_UNSUPPORTED;
+    }
   }
 
   GCOL_Transform * x =
@@ -520,8 +576,8 @@ GCOL_API GCOL_Result gcol_transform_create(const GCOL_Allocator * alloc,
   copy_info(&x->dst, dst);
   x->kind = GCOL_XFORM_MATRIX;
   x->flags = flags;
-  x->src_channels = 3;
-  x->dst_channels = 3;
+  x->src_channels = src_gray ? 1u : 3u;
+  x->dst_channels = dst_gray ? 1u : 3u;
   x->lut = NULL;
   x->icc_profile = NULL;
   x->cmyk_polarity = GCOL_CMYK_POLARITY_UNKNOWN;
@@ -778,7 +834,8 @@ GCOL_API GCOL_Result gcol_transform_apply(const GCOL_Transform * xform,
       enc_dst[1] = clamp01(enc_dst[1]);
       enc_dst[2] = clamp01(enc_dst[2]);
     }
-    write_channels(dst_layout, dp + i * dst_stride, enc_dst, 3, alpha);
+    write_channels(
+        dst_layout, dp + i * dst_stride, enc_dst, xform->dst_channels, alpha);
   }
   return GCOL_OK;
 }

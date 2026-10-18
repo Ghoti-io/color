@@ -109,6 +109,7 @@
 #define gcol_icc_to_color_info GHOTIIO_COLOR(gcol_icc_to_color_info)
 #define gcol_transform_create GHOTIIO_COLOR(gcol_transform_create)
 #define gcol_transform_create_icc GHOTIIO_COLOR(gcol_transform_create_icc)
+#define gcol_transform_create_model GHOTIIO_COLOR(gcol_transform_create_model)
 #define gcol_transform_create_to_icc GHOTIIO_COLOR(gcol_transform_create_to_icc)
 #define gcol_transform_free GHOTIIO_COLOR(gcol_transform_free)
 #define gcol_transform_apply GHOTIIO_COLOR(gcol_transform_apply)
