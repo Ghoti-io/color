@@ -173,6 +173,40 @@ def _argv(name, argv):
     return rewritten
 
 
+_rootless = None
+
+
+def _engine_maps_user():
+    """Whether the engine runs rootless, so container root is the caller.
+
+    A rootless engine (podman by default, docker in its rootless mode) maps
+    root inside the container to whoever started it, and what a reference
+    writes into a mounted directory is theirs. A rootful one (docker's usual
+    install, or podman run as root) does not: the files are owned by root,
+    and the caller cannot replace or delete them afterwards - found on the
+    EVO-X2's docker, 2026-10-17, where a second `make oracle-tools` failed on
+    every file the first had written. Passing --user fixes the rootful case
+    and breaks the rootless one, where it would make the files a subordinate
+    uid's, so the engine is asked rather than guessed from its name.
+    """
+    global _rootless
+    if _rootless is None:
+        def ask(*args):
+            try:
+                return subprocess.run([ENGINE] + list(args),
+                    capture_output=True, text=True,
+                    stdin=subprocess.DEVNULL).stdout
+            except OSError:
+                return ""
+        if "podman" in ask("--version").lower():
+            _rootless = ask("info", "--format",
+                "{{.Host.Security.Rootless}}").strip() == "true"
+        else:
+            _rootless = "rootless" in ask("info", "--format",
+                "{{json .SecurityOptions}}")
+    return _rootless
+
+
 def command(name, argv=None, scratch=None):
     """The argv prefix that runs `name`'s reference.
 
@@ -190,6 +224,11 @@ def command(name, argv=None, scratch=None):
     argv_out = [ENGINE, "run", "--rm", "-i",
             "--network", "none",
             "--volume", "%s:%s:ro" % (ROOT, ROOT)]
+    if not _engine_maps_user() and hasattr(os, "getuid"):
+        # Run as the caller, so what the reference writes is the caller's to
+        # replace. HOME is somewhere it can write, which / is not.
+        argv_out += ["--user", "%d:%d" % (os.getuid(), os.getgid()),
+                     "--env", "HOME=/tmp"]
     for path in ([scratch] if isinstance(scratch, str) else (scratch or [])):
         argv_out += ["--volume", "%s:%s:rw" % (path, path)]
     return argv_out + ["--workdir", ROOT, image] + list(inner)
