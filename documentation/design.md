@@ -8,7 +8,7 @@ absolute scale, LogLuv helpers) are implemented.
 This page says what this library is for, what it refuses to be, and why it
 does not wrap the reference implementation. The phase plan lives outside this
 repository, in the workspace at `planning/color.md`, because it is a note to
-the sessions doing the work rather than to someone who found this library.
+the people doing the work rather than to someone who found this library.
 
 ## What it is
 
