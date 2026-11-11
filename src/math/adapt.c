@@ -62,8 +62,9 @@ GCOL_API GCOL_Result gcol_chromatic_adapt(GCOL_Chromaticity from,
     }
     return GCOL_OK;
   }
-  if (!(from.y > 0.0) || !(to.y > 0.0) || !isfinite(from.x) || !isfinite(from.y) ||
-      !isfinite(to.x) || !isfinite(to.y)) {
+  /* The arguments are widened here: a float given to isfinite is converted back by the Windows headers' macro, which -Wfloat-conversion refuses. */
+  if (!(from.y > 0.0) || !(to.y > 0.0) || !isfinite((double) from.x) || !isfinite((double) from.y) ||
+      !isfinite((double) to.x) || !isfinite((double) to.y)) {
     return GCOL_ERR_INVALID;
   }
 

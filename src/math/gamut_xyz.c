@@ -36,7 +36,7 @@
 #include <math.h>
 
 static int chroma_usable(const GCOL_Chromaticity * c) {
-  return c->y > 0.0 && isfinite(c->x) && isfinite(c->y);
+  return c->y > 0.0 && isfinite((double) c->x) && isfinite((double) c->y);
 }
 
 GCOL_API GCOL_Result gcol_gamut_to_xyz(const GCOL_Gamut * g, double m[9]) {
