@@ -32,7 +32,11 @@
 
 #include <ghoti.io/color/math.h>
 
+#include <float.h>
 #include <math.h>
+
+/* Not isfinite: the Windows headers' macro converts its argument to float on one path, which -Wfloat-conversion refuses. */
+#define gcol_finite(x) (fabs((double) (x)) <= DBL_MAX)
 
 /* ST 2084 constants. */
 static const double gcol_pq_m1 = 2610.0 / 16384.0;
@@ -151,7 +155,7 @@ GCOL_API double gcol_transfer_decode(
   case GCOL_TRANSFER_SRGB:
     return srgb_decode(encoded);
   case GCOL_TRANSFER_GAMMA:
-    if (!(info->gamma_value > 0.0) || !isfinite(info->gamma_value)) {
+    if (!(info->gamma_value > 0.0) || !gcol_finite(info->gamma_value)) {
       return encoded;
     }
     if (encoded < 0.0) {
@@ -186,7 +190,7 @@ GCOL_API double gcol_transfer_encode(
   case GCOL_TRANSFER_SRGB:
     return srgb_encode(linear);
   case GCOL_TRANSFER_GAMMA:
-    if (!(info->gamma_value > 0.0) || !isfinite(info->gamma_value)) {
+    if (!(info->gamma_value > 0.0) || !gcol_finite(info->gamma_value)) {
       return linear;
     }
     if (linear < 0.0) {

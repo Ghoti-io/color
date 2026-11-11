@@ -33,10 +33,14 @@
 
 #include "matrix_internal.h"
 
+#include <float.h>
 #include <math.h>
 
+/* Not isfinite: the Windows headers' macro converts its argument to float on one path, which -Wfloat-conversion refuses. */
+#define gcol_finite(x) (fabs((double) (x)) <= DBL_MAX)
+
 static int chroma_usable(const GCOL_Chromaticity * c) {
-  return c->y > 0.0 && isfinite((double) c->x) && isfinite((double) c->y);
+  return c->y > 0.0 && gcol_finite(c->x) && gcol_finite(c->y);
 }
 
 GCOL_API GCOL_Result gcol_gamut_to_xyz(const GCOL_Gamut * g, double m[9]) {

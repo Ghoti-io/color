@@ -30,7 +30,11 @@
 
 #include "matrix_internal.h"
 
+#include <float.h>
 #include <math.h>
+
+/* Not isfinite: the Windows headers' macro converts its argument to float on one path, which -Wfloat-conversion refuses. */
+#define gcol_finite(x) (fabs((double) (x)) <= DBL_MAX)
 
 /* Bradford; same digits as ICC fixtures' generate.py. */
 static const double gcol_bradford[9] = {
@@ -62,9 +66,8 @@ GCOL_API GCOL_Result gcol_chromatic_adapt(GCOL_Chromaticity from,
     }
     return GCOL_OK;
   }
-  /* The arguments are widened here: a float given to isfinite is converted back by the Windows headers' macro, which -Wfloat-conversion refuses. */
-  if (!(from.y > 0.0) || !(to.y > 0.0) || !isfinite((double) from.x) || !isfinite((double) from.y) ||
-      !isfinite((double) to.x) || !isfinite((double) to.y)) {
+  if (!(from.y > 0.0) || !(to.y > 0.0) || !gcol_finite(from.x) || !gcol_finite(from.y) ||
+      !gcol_finite(to.x) || !gcol_finite(to.y)) {
     return GCOL_ERR_INVALID;
   }
 
